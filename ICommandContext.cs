@@ -5,15 +5,6 @@
 /// </summary>
 public interface ICommandContext
 {
-    void ResetContext() 
-    void SetContext()
-}
-
-/// <summary>
-/// Context가 필요 없는 커맨드용 빈 컨텍스트.
-/// 비제네릭 베이스 클래스 없이도 Context-free 커맨드를 만들 수 있다.
-/// </summary>
-public sealed class EmptyContext : ICommandContext
-{
-    public static readonly EmptyContext Default = new();
+    void ResetContext();
+    void SetContext();
 }
