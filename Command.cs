@@ -34,7 +34,7 @@ public abstract class Command<T> where T : class, ICommandContext
     /// </summary>
     public UniTask<bool> Execute()
     {
-        var commandEvent = EventBus.Instance.CommandEvents.GetOrCreate<T>(GetType());
+        var commandEvent = CommandEventRegistry.CommandEvents.GetOrCreate<T>(GetType());
         return commandEvent.Run(Context, this);
     }
 
@@ -45,7 +45,7 @@ public abstract class Command<T> where T : class, ICommandContext
     /// </summary>
     public (bool IsValid, T Context) Preview()
     {
-        var commandEvent = EventBus.Instance.CommandEvents.GetOrCreate<T>(GetType());
+        var commandEvent = CommandEventRegistry.CommandEvents.GetOrCreate<T>(GetType());
         return commandEvent.PreviewRun(Context, this);
     }
 }

@@ -5,9 +5,9 @@ using System.Collections.Generic;
 /// CommandEvent를 Type 키로 관리하는 레지스트리.
 /// Hemi 방식: Type 키 + 제네릭 타입 검증으로 런타임 안전성 확보.
 /// </summary>
-public sealed class CommandEventRegistry
+public static sealed class CommandEventRegistry
 {
-    private readonly Dictionary<Type, ICommandEvent> _events = new();
+    private static readonly Dictionary<Type, ICommandEvent> _events = new();
 
     /// <summary>
     /// commandType에 해당하는 CommandEvent를 가져오거나 새로 생성.
