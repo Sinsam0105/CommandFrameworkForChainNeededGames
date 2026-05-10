@@ -5,7 +5,7 @@ using System.Collections.Generic;
 /// CommandEvent를 Type 키로 관리하는 레지스트리.
 /// Hemi 방식: Type 키 + 제네릭 타입 검증으로 런타임 안전성 확보.
 /// </summary>
-public static sealed class CommandEventRegistry
+public static class CommandEventRegistry
 {
     private static readonly Dictionary<Type, ICommandEvent> _events = new();
 
@@ -13,7 +13,7 @@ public static sealed class CommandEventRegistry
     /// commandType에 해당하는 CommandEvent를 가져오거나 새로 생성.
     /// 이미 등록된 이벤트의 Context 타입이 다르면 예외 발생.
     /// </summary>
-    public CommandEvent<TContext> GetOrCreate<TContext>(Type commandType)
+    public static CommandEvent<TContext> GetOrCreate<TContext>(Type commandType)
         where TContext : class, ICommandContext
     {
         if (_events.TryGetValue(commandType, out var existing))
@@ -43,7 +43,7 @@ public static sealed class CommandEventRegistry
     /// 이벤트 구독 시 사용: 
     ///   registry.GetOrCreate&lt;AttackCommand, HealthCommandContext&gt;().EditEvent += ...
     /// </summary>
-    public CommandEvent<TContext> GetOrCreate<TCommand, TContext>()
+    public static CommandEvent<TContext> GetOrCreate<TCommand, TContext>()
         where TCommand : Command<TContext>
         where TContext : class, ICommandContext
     {
