@@ -5,8 +5,8 @@
 /// </summary>
 public interface ICommandContext
 {
-    void ResetContext() { }
-    void SetContext() { }
+    void ResetContext() 
+    void SetContext()
 }
 
 /// <summary>
