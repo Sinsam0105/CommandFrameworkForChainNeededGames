@@ -1,0 +1,10 @@
+{
+  "name": "com.shared.command-framework",
+  "version": "1.0.0",
+  "displayName": "Command Framework",
+  "description": "Shared Command pattern framework with EventBus",
+  "unity": "2021.3",
+  "dependencies": {
+    "com.cysharp.unitask": "2.0.0"
+  }
+}
