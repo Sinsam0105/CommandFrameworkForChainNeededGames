@@ -7,7 +7,7 @@ using System.Collections.Generic;
 /// </summary>
 public static class CommandEventRegistry
 {
-    public static readonly Dictionary<Type, ICommandEvent> CommandEvents { get; private set; } = new();
+    public static readonly Dictionary<Type, ICommandEvent> CommandEvents = new();
 
     /// <summary>
     /// commandType에 해당하는 CommandEvent를 가져오거나 새로 생성.
