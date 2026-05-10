@@ -7,7 +7,7 @@ using System.Collections.Generic;
 /// </summary>
 public static class CommandEventRegistry
 {
-    private static readonly Dictionary<Type, ICommandEvent> CommandEvents = new();
+    public static readonly Dictionary<Type, ICommandEvent> CommandEvents { get; private set; } = new();
 
     /// <summary>
     /// commandType에 해당하는 CommandEvent를 가져오거나 새로 생성.
@@ -16,7 +16,7 @@ public static class CommandEventRegistry
     public static CommandEvent<TContext> GetOrCreate<TContext>(Type commandType)
         where TContext : class, ICommandContext
     {
-        if (_events.TryGetValue(commandType, out var existing))
+        if (CommandEvents.TryGetValue(commandType, out var existing))
         {
             if (existing is CommandEvent<TContext> typed)
                 return typed;
