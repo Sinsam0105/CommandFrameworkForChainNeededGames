@@ -75,32 +75,35 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     {
         try
         {
-            // 1. 외부 Validation
+            // 1. Edit (수치 보정)
+            _editEvent?.Invoke(context);
+            // 2. 외부 Validation
             if (_validationEvent != null)
             {
                 foreach (var handler in _validationEvent.GetInvocationList()
                              .Cast<ValidationEventHandler>())
                 {
                     if (!handler(context))
+                    {
                         return false;
+                    }
+
                 }
             }
-
-            // 2. 커맨드 자체 Validation
+            // 3. 커맨드 자체 Validation
             if (!command.ValidateInCommand())
+            {
                 return false;
-
-            // 3. Edit (수치 보정)
-            _editEvent?.Invoke(context);
-
+            }
             // 4. Before
             InvokeSequential(_beforeFrontEndEvent, context);
 
             // 5. Logic
             bool result = await command.Logic();
             if (!result)
+            {
                 return false;
-
+            }
             // 6. FrontEnd
             InvokeSequential(_frontEndEvent, context);
 
