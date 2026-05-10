@@ -51,12 +51,3 @@ public sealed class CommandEventRegistry
     }
 }
 
-/// <summary>
-/// 프레임워크 전역 이벤트 버스.
-/// 프로젝트별 확장이 필요하면 partial class 또는 상속으로 추가.
-/// (예: PRC의 TurnEvents는 프로젝트 쪽에서 EventBus를 상속해 추가)
-/// </summary>
-public class EventBus : MonoSingleton<EventBus>
-{
-    public readonly CommandEventRegistry CommandEvents = new();
-}
