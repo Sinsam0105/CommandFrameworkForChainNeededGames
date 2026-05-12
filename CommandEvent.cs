@@ -125,6 +125,7 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     /// </summary>
     public (bool IsValid, T Context) PreviewRun(T context, Command<T> command)
     {
+        _editEvent?.Invoke(context);
         if (_validationEvent != null)
         {
             foreach (var handler in _validationEvent.GetInvocationList()
@@ -137,8 +138,6 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
 
         if (!command.ValidateInCommand())
             return (false, context);
-
-        _editEvent?.Invoke(context);
 
         return (true, context);
     }
