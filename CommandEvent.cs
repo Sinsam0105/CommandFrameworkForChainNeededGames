@@ -12,13 +12,14 @@ public interface ICommandEvent
 /// 커맨드 실행 파이프라인.
 /// 
 /// 실행 순서:
-///   1. ValidationEvent (외부 구독자) — 하나라도 false면 중단
-///   2. ValidateInCommand()          — 커맨드 자체 검증
-///   3. EditEvent                    — Context 수치 보정 (데미지 증감 등)
-///   4. BeforeFrontEndEvent          — Logic 직전 처리
-///   5. Command.Logic()              — 핵심 로직 실행
-///   6. FrontEndEvent                — UI 연출 등
-///   7. AfterEvent                   — 후처리
+///   1. EditEvent                    — Context 수치 보정 (데미지 증감 등. Reset 가능한 가역적인 것들만)
+///   2. BeforeFrontEndEvent          — Logic 직전 처리
+///   3. ValidationEvent (외부 구독자) — 하나라도 false면 중단
+///   4. ValidateInCommand()          — 커맨드 자체 검증
+///   5. ResoveEvent                  — Context 최종 보정 (비가역적인 것들)
+///   6. Command.Logic()              — 핵심 로직 실행
+///   7. FrontEndEvent                — UI 연출 등
+///   8. AfterEvent                   — 후처리
 ///   finally: Context.ResetContext() — 임시값 정리 보장
 ///
 /// 모든 delegate가 T를 직접 받으므로 구독자 쪽 캐스팅 불필요.
@@ -30,10 +31,12 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
 
     public delegate bool ValidationEventHandler(T context);
     public delegate void EditEventHandler(T context);
+    public delegate void ResoveEventHandler(T context);
     public delegate void EventHandler(T context);
 
     private ValidationEventHandler _validationEvent;
     private EditEventHandler _editEvent;
+    private ResoveEventHandler _resoveEvent;
     private EventHandler _beforeFrontEndEvent;
     private EventHandler _frontEndEvent;
     private EventHandler _afterEvent;
@@ -48,6 +51,12 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     {
         add => _editEvent += value;
         remove => _editEvent -= value;
+    }
+
+    public event ResoveEventHandler ResoveEvent
+    {
+        add => _resoveEvent += value;
+        remove => _resoveEvent -= value;
     }
 
     public event EventHandler BeforeFrontEndEvent
@@ -97,6 +106,8 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
             }
             // 4. Before
             InvokeSequential(_beforeFrontEndEvent, context);
+
+            InvokeSequential(_resoveEvent, context);
 
             // 5. Logic
             bool result = await command.Logic();
