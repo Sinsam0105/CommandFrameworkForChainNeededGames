@@ -107,8 +107,7 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
             InvokeSequential(_beforeFrontEndEvent, context);
 
             // 5. Resolve
-            InvokeSequential(_resolveEvent, context);
-
+            _resolveEvent?.Invoke(context);
             // 6. Logic
             bool result = await command.Logic();
 
