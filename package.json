@@ -1,10 +1,14 @@
 {
-  "name": "com.shared.command-framework",
+  "name": "com.sinsam.command-framework",
   "version": "1.0.0",
   "displayName": "Command Framework",
-  "description": "Shared Command pattern framework with EventBus",
+  "description": "Command pattern framework with EventBus",
   "unity": "2021.3",
   "dependencies": {
     "com.cysharp.unitask": "2.0.0"
+  },
+    "author": {
+    "name": "Sinsam"
   }
+  
 }
