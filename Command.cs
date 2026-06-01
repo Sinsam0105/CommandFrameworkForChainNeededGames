@@ -38,9 +38,10 @@ public abstract class Command<T> where T : class, ICommandContext
     public UniTask<bool> Execute()
     {
         var commandEvent = CommandEventRegistry.GetOrCreate<T>(GetType());
-        if (Context != null && Context.IsPreview)
+        // 이미 preview 사본이거나(Context.IsPreview), preview 실행 도중 생성된 중첩 커맨드면
+        // (CommandPreviewScope.IsActive) commit·부수효과 없이 in-place preview 경로로.
+        if ((Context != null && Context.IsPreview) || CommandPreviewScope.IsActive)
         {
-            // 이미 preview 그래프 위에서 동작 중이므로 그대로 in-place 실행.
             return commandEvent.RunInternal(Context, this, preview: true);
         }
         return commandEvent.Run(Context, this);
