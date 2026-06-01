@@ -28,11 +28,24 @@ public static class DeepCloneHelper
 
     public static T AutoClone<T>(T source, bool markPreview = false)
     {
-        var visited = new Dictionary<object, object>(ReferenceEqualityComparer.Instance);
-        return (T)CloneObject(source, visited, markPreview);
+        return (T)CloneObject(source, NewRegistry(), markPreview);
     }
 
-    private static object CloneObject(object source, Dictionary<object, object> visited, bool markPreview)
+    /// <summary>
+    /// 외부 registry(real→clone 맵)를 공유해 복제한다.
+    /// 같은 real 객체는 항상 같은 clone으로 매핑되므로, 여러 번에 걸쳐 복제해도 그래프 일관성이 유지된다.
+    /// (보드 Snapshot: 컨텍스트 클론과 이후 지연 복제되는 엔티티가 같은 클론을 공유하도록 함)
+    /// </summary>
+    public static T AutoClone<T>(T source, bool markPreview, IDictionary<object, object> registry)
+    {
+        return (T)CloneObject(source, registry, markPreview);
+    }
+
+    /// <summary>참조 동일성(identity) 기반의 빈 registry 생성.</summary>
+    public static IDictionary<object, object> NewRegistry()
+        => new Dictionary<object, object>(ReferenceEqualityComparer.Instance);
+
+    private static object CloneObject(object source, IDictionary<object, object> visited, bool markPreview)
     {
         if (source == null)
             return null;
@@ -85,7 +98,7 @@ public static class DeepCloneHelper
         return clone;
     }
 
-    private static object CloneStruct(object source, Type type, Dictionary<object, object> visited, bool markPreview)
+    private static object CloneStruct(object source, Type type, IDictionary<object, object> visited, bool markPreview)
     {
         object boxed = source; // 박싱하면서 값 복사가 일어난다.
         foreach (var field in type.GetFields(Flags))
@@ -106,7 +119,7 @@ public static class DeepCloneHelper
         return boxed;
     }
 
-    private static void CloneFields(object source, object clone, Type type, Dictionary<object, object> visited, bool markPreview)
+    private static void CloneFields(object source, object clone, Type type, IDictionary<object, object> visited, bool markPreview)
     {
         for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
         {
