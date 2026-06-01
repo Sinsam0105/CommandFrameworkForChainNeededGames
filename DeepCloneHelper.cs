@@ -5,159 +5,154 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 
-/// <summary>
-/// 어트리뷰트 기반 자동 깊은 복사 유틸리티.
-///
-/// 복사 정책:
-///   - primitive / enum / string / decimal      : 그대로 복사(불변)
-///   - struct(값 타입)                            : 박싱 복사 후, 내부 참조 필드만 깊은 복사
-///   - UnityEngine.Object(Mono/SO/GameObject 등)  : 참조 유지(절대 복제하지 않음)
-///   - delegate                                   : 참조 유지
-///   - [CloneReference] 필드                       : 참조 유지
-///   - [CloneIgnore]  필드                         : 건너뜀(기본값)
-///   - IList&lt;T&gt;                              : 원소별 복사
-///   - 그 외 class                                 : 생성자 우회 후 필드 재귀 복사
-///
-/// 순환 참조와 공유 참조는 visited 맵으로 보존한다.
-/// markPreview=true면 복제된 모든 IPreviewable의 IsPreview를 true로 설정한다.
-/// </summary>
-public static class DeepCloneHelper
+namespace Sinsam.CommandFramework
 {
-    private const BindingFlags Flags =
-        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-    public static T AutoClone<T>(T source, bool markPreview = false)
-    {
-        return (T)CloneObject(source, NewRegistry(), markPreview);
-    }
-
     /// <summary>
-    /// 외부 registry(real→clone 맵)를 공유해 복제한다.
-    /// 같은 real 객체는 항상 같은 clone으로 매핑되므로, 여러 번에 걸쳐 복제해도 그래프 일관성이 유지된다.
-    /// (보드 Snapshot: 컨텍스트 클론과 이후 지연 복제되는 엔티티가 같은 클론을 공유하도록 함)
+    /// 어트리뷰트 기반 자동 깊은 복사 유틸리티.
+    ///
+    /// 복사 정책:
+    ///   - primitive / enum / string / decimal      : 그대로 복사(불변)
+    ///   - struct(값 타입)                            : 박싱 복사 후, 내부 참조 필드만 깊은 복사
+    ///   - UnityEngine.Object(Mono/SO/GameObject 등)  : 참조 유지(절대 복제하지 않음)
+    ///   - delegate                                   : 참조 유지
+    ///   - [CloneReference] 필드                       : 참조 유지
+    ///   - [CloneIgnore]  필드                         : 건너뜀(기본값)
+    ///   - IList&lt;T&gt;                              : 원소별 복사
+    ///   - 그 외 class                                 : 생성자 우회 후 필드 재귀 복사
+    ///
+    /// 순환 참조와 공유 참조는 visited 맵으로 보존한다.
+    /// markPreview=true면 복제된 모든 IPreviewable의 IsPreview를 true로 설정한다.
     /// </summary>
-    public static T AutoClone<T>(T source, bool markPreview, IDictionary<object, object> registry)
+    public static class DeepCloneHelper
     {
-        return (T)CloneObject(source, registry, markPreview);
-    }
+        private const BindingFlags Flags =
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
-    /// <summary>참조 동일성(identity) 기반의 빈 registry 생성.</summary>
-    public static IDictionary<object, object> NewRegistry()
-        => new Dictionary<object, object>(ReferenceEqualityComparer.Instance);
-
-    private static object CloneObject(object source, IDictionary<object, object> visited, bool markPreview)
-    {
-        if (source == null)
-            return null;
-
-        Type type = source.GetType();
-
-        // 1. 불변 값
-        if (type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal))
-            return source;
-
-        // 2. struct: 값 복사 후 내부 참조 필드만 깊은 복사
-        if (type.IsValueType)
-            return CloneStruct(source, type, visited, markPreview);
-
-        // 3. Unity 오브젝트 / delegate : 참조 유지
-        if (source is UnityEngine.Object || source is Delegate)
-            return source;
-
-        // 4. 이미 복제한 인스턴스면 동일 참조 재사용(순환/공유 보존)
-        if (visited.TryGetValue(source, out var existing))
-            return existing;
-
-        // 5. 배열
-        if (type.IsArray)
+        public static T AutoClone<T>(T source, bool markPreview = false)
         {
-            var srcArray = (Array)source;
-            var clonedArray = Array.CreateInstance(type.GetElementType(), srcArray.Length);
-            visited[source] = clonedArray;
-            for (int i = 0; i < srcArray.Length; i++)
-                clonedArray.SetValue(CloneObject(srcArray.GetValue(i), visited, markPreview), i);
-            return clonedArray;
+            return (T)CloneObject(source, NewRegistry(), markPreview);
         }
 
-        // 6. 리스트
-        if (source is IList list && type.IsGenericType)
+        /// <summary>
+        /// 외부 registry(real→clone 맵)를 공유해 복제한다.
+        /// 같은 real 객체는 항상 같은 clone으로 매핑되므로, 여러 번에 걸쳐 복제해도 그래프 일관성이 유지된다.
+        /// (보드 Snapshot: 컨텍스트 클론과 이후 지연 복제되는 엔티티가 같은 클론을 공유하도록 함)
+        /// </summary>
+        public static T AutoClone<T>(T source, bool markPreview, IDictionary<object, object> registry)
         {
-            var clonedList = (IList)Activator.CreateInstance(type);
-            visited[source] = clonedList;
-            foreach (var item in list)
-                clonedList.Add(CloneObject(item, visited, markPreview));
-            MarkPreview(clonedList, markPreview);
-            return clonedList;
+            return (T)CloneObject(source, registry, markPreview);
         }
 
-        // 7. 일반 class: 생성자를 우회해 인스턴스 생성 후 필드 복사
-        object clone = FormatterServices.GetUninitializedObject(type);
-        visited[source] = clone;
-        CloneFields(source, clone, type, visited, markPreview);
-        MarkPreview(clone, markPreview);
-        return clone;
-    }
+        /// <summary>참조 동일성(identity) 기반의 빈 registry 생성.</summary>
+        public static IDictionary<object, object> NewRegistry()
+            => new Dictionary<object, object>(ReferenceEqualityComparer.Instance);
 
-    private static object CloneStruct(object source, Type type, IDictionary<object, object> visited, bool markPreview)
-    {
-        object boxed = source; // 박싱하면서 값 복사가 일어난다.
-        foreach (var field in type.GetFields(Flags))
+        private static object CloneObject(object source, IDictionary<object, object> visited, bool markPreview)
         {
-            Type ft = field.FieldType;
-            if (ft.IsPrimitive || ft.IsEnum || ft == typeof(string) || ft == typeof(decimal))
-                continue;
+            if (source == null)
+                return null;
 
-            object value = field.GetValue(boxed);
-            if (value == null)
-                continue;
-            if (field.IsDefined(typeof(CloneReferenceAttribute), true) ||
-                value is UnityEngine.Object || value is Delegate)
-                continue;
+            Type type = source.GetType();
 
-            field.SetValue(boxed, CloneObject(value, visited, markPreview));
-        }
-        return boxed;
-    }
+            if (type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal))
+                return source;
 
-    private static void CloneFields(object source, object clone, Type type, IDictionary<object, object> visited, bool markPreview)
-    {
-        for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
-        {
-            foreach (var field in t.GetFields(Flags | BindingFlags.DeclaredOnly))
+            if (type.IsValueType)
+                return CloneStruct(source, type, visited, markPreview);
+
+            if (source is UnityEngine.Object || source is Delegate)
+                return source;
+
+            if (visited.TryGetValue(source, out var existing))
+                return existing;
+
+            if (type.IsArray)
             {
-                if (field.IsDefined(typeof(CloneIgnoreAttribute), true))
+                var srcArray = (Array)source;
+                var clonedArray = Array.CreateInstance(type.GetElementType(), srcArray.Length);
+                visited[source] = clonedArray;
+                for (int i = 0; i < srcArray.Length; i++)
+                    clonedArray.SetValue(CloneObject(srcArray.GetValue(i), visited, markPreview), i);
+                return clonedArray;
+            }
+
+            if (source is IList list && type.IsGenericType)
+            {
+                var clonedList = (IList)Activator.CreateInstance(type);
+                visited[source] = clonedList;
+                foreach (var item in list)
+                    clonedList.Add(CloneObject(item, visited, markPreview));
+                MarkPreview(clonedList, markPreview);
+                return clonedList;
+            }
+
+            object clone = FormatterServices.GetUninitializedObject(type);
+            visited[source] = clone;
+            CloneFields(source, clone, type, visited, markPreview);
+            MarkPreview(clone, markPreview);
+            return clone;
+        }
+
+        private static object CloneStruct(object source, Type type, IDictionary<object, object> visited, bool markPreview)
+        {
+            object boxed = source;
+            foreach (var field in type.GetFields(Flags))
+            {
+                Type ft = field.FieldType;
+                if (ft.IsPrimitive || ft.IsEnum || ft == typeof(string) || ft == typeof(decimal))
                     continue;
 
-                object value = field.GetValue(source);
+                object value = field.GetValue(boxed);
                 if (value == null)
-                {
-                    field.SetValue(clone, null);
                     continue;
-                }
-
-                // 참조 유지 대상
                 if (field.IsDefined(typeof(CloneReferenceAttribute), true) ||
                     value is UnityEngine.Object || value is Delegate)
-                {
-                    field.SetValue(clone, value);
                     continue;
-                }
 
-                field.SetValue(clone, CloneObject(value, visited, markPreview));
+                field.SetValue(boxed, CloneObject(value, visited, markPreview));
+            }
+            return boxed;
+        }
+
+        private static void CloneFields(object source, object clone, Type type, IDictionary<object, object> visited, bool markPreview)
+        {
+            for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+            {
+                foreach (var field in t.GetFields(Flags | BindingFlags.DeclaredOnly))
+                {
+                    if (field.IsDefined(typeof(CloneIgnoreAttribute), true))
+                        continue;
+
+                    object value = field.GetValue(source);
+                    if (value == null)
+                    {
+                        field.SetValue(clone, null);
+                        continue;
+                    }
+
+                    if (field.IsDefined(typeof(CloneReferenceAttribute), true) ||
+                        value is UnityEngine.Object || value is Delegate)
+                    {
+                        field.SetValue(clone, value);
+                        continue;
+                    }
+
+                    field.SetValue(clone, CloneObject(value, visited, markPreview));
+                }
             }
         }
-    }
 
-    private static void MarkPreview(object instance, bool markPreview)
-    {
-        if (markPreview && instance is IPreviewable previewable)
-            previewable.IsPreview = true;
-    }
+        private static void MarkPreview(object instance, bool markPreview)
+        {
+            if (markPreview && instance is IPreviewable previewable)
+                previewable.IsPreview = true;
+        }
 
-    private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
-    {
-        public static readonly ReferenceEqualityComparer Instance = new ReferenceEqualityComparer();
-        bool IEqualityComparer<object>.Equals(object x, object y) => ReferenceEquals(x, y);
-        int IEqualityComparer<object>.GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
+        private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
+        {
+            public static readonly ReferenceEqualityComparer Instance = new ReferenceEqualityComparer();
+            bool IEqualityComparer<object>.Equals(object x, object y) => ReferenceEquals(x, y);
+            int IEqualityComparer<object>.GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
+        }
     }
 }
