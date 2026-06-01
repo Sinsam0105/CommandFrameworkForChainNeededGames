@@ -176,23 +176,31 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
             return (false, null);
         }
 
-        var clone = DeepCloneHelper.AutoClone(context, markPreview: true);
-
-        // 검증/Edit이 사본을 보도록 command.Context를 잠시 사본으로 교체한다.
-        var original = command.Context;
-        command.Context = clone;
-        bool valid;
+        // 최상위 진입에서 스냅샷을 만들고, 컨텍스트를 그 스냅샷 registry로 복제한다.
+        // 이후 Logic 안에서 PreviewAware.Data로 지연 복제되는 엔티티도 같은 클론을 공유한다.
+        CommandPreviewScope.Enter();
         try
         {
-            // preview=true이므로 Logic에 도달하기 전에 동기적으로 완료된다.
-            valid = RunInternal(clone, command, preview: true).GetAwaiter().GetResult();
+            var clone = CommandPreviewScope.Snapshot.GetClone(context);
+
+            // 검증/Edit/Logic이 사본을 보도록 command.Context를 잠시 사본으로 교체한다.
+            var original = command.Context;
+            command.Context = clone;
+            try
+            {
+                // preview=true이므로 (데이터 외적 await가 스코프 가드로 빠져) 동기적으로 완료된다.
+                bool valid = RunInternal(clone, command, preview: true).GetAwaiter().GetResult();
+                return (valid, clone);
+            }
+            finally
+            {
+                command.Context = original;
+            }
         }
         finally
         {
-            command.Context = original;
+            CommandPreviewScope.Exit();
         }
-
-        return (valid, clone);
     }
 
     private static void InvokeSequential(CommandEventHandler evt, T context)

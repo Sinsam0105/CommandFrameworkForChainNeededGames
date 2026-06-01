@@ -16,10 +16,19 @@ public static class CommandPreviewScope
 
     public static bool IsActive => _depth > 0;
 
-    public static void Enter() => _depth++;
+    /// <summary>현재 preview의 보드 스냅샷(최상위 진입 시 생성, 모든 깊이에서 공유).</summary>
+    public static PreviewSnapshot Snapshot { get; private set; }
+
+    public static void Enter()
+    {
+        if (_depth == 0) Snapshot = new PreviewSnapshot();
+        _depth++;
+    }
 
     public static void Exit()
     {
-        if (_depth > 0) _depth--;
+        if (_depth <= 0) return;
+        _depth--;
+        if (_depth == 0) Snapshot = null;
     }
 }
