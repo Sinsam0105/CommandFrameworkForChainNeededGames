@@ -94,6 +94,14 @@ public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
             // 1. Edit
             _editEvent?.Invoke(context);
 
+            // 1.5 자동 NullCheck ([NullCheck] 필드가 null이면 무효)
+            if (RuntimeDataReflection.HasNullCheckViolation(context, out var nullField))
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[{CommandName}] NullCheck 실패: '{nullField}' 필드가 null이라 커맨드를 중단합니다.");
+                return false;
+            }
+
             // 2. 외부 Validation
             if (_validationEvent != null)
             {
