@@ -1,6 +1,6 @@
 {
   "name": "com.sinsam.command-framework",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Command Framework",
   "description": "Command pattern framework with EventBus",
   "unity": "2021.3",
