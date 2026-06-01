@@ -30,18 +30,27 @@ public abstract class Command<T> where T : class, ICommandContext
 
     /// <summary>
     /// 커맨드 실행 진입점.
-    /// EventBus에서 CommandEvent를 꺼내 파이프라인(Validation → Edit → Logic → FrontEnd → After)을 실행.
+    /// EventBus에서 CommandEvent를 꺼내 파이프라인(Edit → Validation → Logic → FrontEnd → After)을 실행.
+    ///
+    /// Context가 이미 Preview 사본(IsPreview=true)이면 — 즉 Preview 도중 Logic에서 만들어진
+    /// 중첩 커맨드라면 — commit·부수효과 없이 in-place로 preview 경로를 탄다(재복사하지 않음).
     /// </summary>
     public UniTask<bool> Execute()
     {
         var commandEvent = CommandEventRegistry.GetOrCreate<T>(GetType());
+        if (Context != null && Context.IsPreview)
+        {
+            // 이미 preview 그래프 위에서 동작 중이므로 그대로 in-place 실행.
+            return commandEvent.RunInternal(Context, this, preview: true);
+        }
         return commandEvent.Run(Context, this);
     }
 
     /// <summary>
-    /// EditEvent까지만 실행하여 최종 Context 상태를 미리 본다.
-    /// Logic은 실행되지 않으므로 부수효과 없음.
-    /// 주의: Preview 후 반드시 Context.ResetContext()를 호출할 것.
+    /// 실제 데이터를 깊은 복사한 Preview 사본에 파이프라인을 적용해 최종 상태를 미리 본다.
+    /// 실제 Context/엔티티는 변경되지 않으므로 ResetContext 호출이 필요 없다.
+    /// 반환되는 Context는 효과가 적용된 사본(PreviewInstance)이다.
+    /// (Phase 0: Edit/Validation 단계까지. Logic-in-preview는 부수효과 분리 후 개방.)
     /// </summary>
     public (bool IsValid, T Context) Preview()
     {
