@@ -149,7 +149,23 @@ namespace Sinsam.CommandFramework
                 command.Context = clone;
                 try
                 {
-                    bool valid = RunInternal(clone, command, preview: true).GetAwaiter().GetResult();
+                    // Preview는 동기를 전제로 한다. AsyncLocal 기반 PreviewScope는 await 경계를
+                    // 넘어 유지되지 않으므로, Logic이 실제로 await하면 중첩 커맨드가 preview가 아닌
+                    // 실제 데이터를 건드릴 수 있다(또는 GetResult가 미완료 task를 블로킹).
+                    // 따라서 Logic 호출 직후 즉시 완료됐는지 확인하고, 아니면 조용한 오염 대신
+                    // 시끄러운 실패(throw)로 바꾼다.
+                    var runTask = RunInternal(clone, command, preview: true);
+                    if (!runTask.Status.IsCompleted())
+                    {
+                        throw new InvalidOperationException(
+                            $"[{CommandName}] Preview Logic은 동기적으로 완료되어야 합니다. " +
+                            $"Logic()이 preview 도중 실제 비동기 작업(await)을 수행했습니다. " +
+                            $"AsyncLocal 기반 PreviewScope는 await 경계를 넘어 유지되지 않으므로, " +
+                            $"중첩 커맨드가 preview가 아닌 실제 데이터를 건드릴 수 있습니다. " +
+                            $"preview 대상 Logic은 즉시 완료되도록(동기) 작성하세요.");
+                    }
+
+                    bool valid = runTask.GetAwaiter().GetResult();
                     return (valid, clone);
                 }
                 finally
