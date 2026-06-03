@@ -13,14 +13,14 @@ namespace Sinsam.CommandFramework
     /// <summary>
     /// 커맨드 실행 파이프라인.
     ///
-    /// 실행 순서:
-    ///   [Preview 포함]
-    ///     EditAsync (Preview 스킵) → Edit → Validation
-    ///     → ValidateInCommand → Logic
-    ///   [Preview 스킵]
-    ///     → BeforeFrontEndAsync → BeforeFrontEnd
-    ///     → FrontEndAsync → FrontEnd
-    ///     → AfterAsync → After
+    /// 일반 실행 순서:
+    ///   EditAsync → Edit → Validation → ValidateInCommand → Logic
+    ///   → BeforeFrontEndAsync → BeforeFrontEnd
+    ///   → FrontEndAsync → FrontEnd
+    ///   → AfterAsync → After
+    ///
+    /// PreviewRun은 Edit → Validation → ValidateInCommand → Logic까지만 실행한다.
+    /// AsyncPreviewRun은 EditAsync와 front-end 계열을 포함하며, 옵션에 따라 After 계열까지 실행한다.
     /// </summary>
     public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     {
@@ -47,7 +47,7 @@ namespace Sinsam.CommandFramework
         private CommandEventHandler _afterEvent;
 
         // ── Async 이벤트 등록 ──────────────────────────────────────────
-        /// <summary>선택 대기, 외부 입력 주입 등. Preview에서 스킵된다.</summary>
+        /// <summary>선택 대기, 외부 입력 주입 등. 기본 PreviewRun에서는 스킵되고 AsyncPreviewRun에서는 실행된다.</summary>
         public event AsyncEventHandler EditAsyncEvent
         {
             add => _editAsyncEvent += value;
@@ -112,135 +112,130 @@ namespace Sinsam.CommandFramework
             if (context == null || command == null)
                 return false;
 
-            T originalCommandContext = null;
-            bool restoreCommandContext = false;
-
-            if (preview) CommandPreviewScope.Enter();
             try
             {
-                // PreviewScope 안에서 실제 Context가 들어오면 같은 Snapshot registry를 통해 자동으로 사본으로 치환한다.
-                if (preview && !context.IsPreview)
-                {
-                    var snapshot = CommandPreviewScope.Snapshot;
-                    if (snapshot != null)
-                    {
-                        originalCommandContext = command.Context;
-                        context = snapshot.GetClone(context);
-                        command.Context = context;
-                        restoreCommandContext = true;
-                    }
-                }
-
-                // EditAsync: 선택 대기 등 비동기 주입. Preview에서는 스킵.
                 if (!preview && _editAsyncEvent != null)
-                {
                     await InvokeSequentialAsync(_editAsyncEvent, context);
-                }
 
-                _editEvent?.Invoke(context);
-
-                if (RuntimeDataReflection.HasNullCheckViolation(context, out var nullField))
-                {
-                    UnityEngine.Debug.LogWarning(
-                        $"[{CommandName}] NullCheck 실패: '{nullField}' 필드가 null이라 커맨드를 중단합니다.");
-                    return false;
-                }
-
-                // Validation (sync)
-                if (_validationEvent != null)
-                {
-                    foreach (var handler in _validationEvent.GetInvocationList()
-                                 .Cast<ValidationEventHandler>())
-                    {
-                        if (!handler(context))
-                            return false;
-                    }
-                }
-
-                if (!command.ValidateInCommand())
-                    return false;
-
-                // Logic (sync) — Preview는 여기까지
-                bool result = command.Logic();
+                bool result = RunSyncCore(context, command);
                 if (!result)
                     return false;
 
                 if (!preview)
-                {
-                    if (_beforeFrontEndAsyncEvent != null)
-                        await InvokeSequentialAsync(_beforeFrontEndAsyncEvent, context);
-
-                    InvokeSequential(_beforeFrontEndEvent, context);
-
-                    if (_frontEndAsyncEvent != null)
-                        await InvokeSequentialAsync(_frontEndAsyncEvent, context);
-
-                    InvokeSequential(_frontEndEvent, context);
-
-                    if (_afterAsyncEvent != null)
-                        await InvokeSequentialAsync(_afterAsyncEvent, context);
-
-                    InvokeSequential(_afterEvent, context);
-                }
+                    await RunFrontEndAndAfterAsync(context, runAfterEvents: true);
 
                 return true;
             }
             finally
             {
-                if (restoreCommandContext)
-                    command.Context = originalCommandContext;
-
-                if (preview)
-                {
-                    CommandPreviewScope.Exit();
-                }
-                else
-                {
+                if (!preview)
                     context?.ResetContext();
-                }
             }
         }
 
         /// <summary>
-        /// Logic이 sync이므로 Preview는 항상 동기적으로 완료된다.
-        /// EditAsync는 스킵되므로 Context에 이미 필요한 값이 채워진 상태여야 한다.
+        /// Logic이 sync이므로 기본 PreviewRun은 항상 동기적으로 완료된다.
+        /// EditAsync와 front-end 계열은 실행하지 않는다.
         /// </summary>
         public (bool IsValid, T Context) PreviewRun(T context, Command<T> command)
         {
             if (context == null || command == null)
                 return (false, null);
 
-            CommandPreviewScope.Enter();
+            var session = new PreviewSession();
+            var clone = session.GetClone(context);
+            var original = command.Context;
+            command.Context = clone;
+
             try
             {
-                var clone = CommandPreviewScope.Snapshot.GetClone(context);
-                var original = command.Context;
-                command.Context = clone;
-                try
-                {
-                    var runTask = RunInternal(clone, command, preview: true);
-
-                    // Logic이 sync이고 Preview에서는 async/front-end 계열이 스킵되므로 즉시 완료되어야 한다.
-                    // 완료되지 않았다면 Preview 파이프라인 설계 위반으로 본다.
-                    if (!runTask.Status.IsCompleted())
-                    {
-                        throw new InvalidOperationException(
-                            $"[{CommandName}] Preview 실행이 동기적으로 완료되지 않았습니다. " +
-                            $"Logic()은 sync여야 하며, Preview 파이프라인이 실제 await를 수행해선 안 됩니다.");
-                    }
-
-                    bool valid = runTask.GetAwaiter().GetResult();
-                    return (valid, clone);
-                }
-                finally
-                {
-                    command.Context = original;
-                }
+                bool valid = RunSyncCore(clone, command);
+                return (valid, clone);
             }
             finally
             {
-                CommandPreviewScope.Exit();
+                command.Context = original;
             }
+        }
+
+        /// <summary>
+        /// PreviewSession이 주입된 clone context에서 async/front-end 이벤트까지 포함해 preview 파이프라인을 실행한다.
+        /// runAfterEvents=true면 AfterAsync/After도 preview context를 들고 발행된다.
+        /// </summary>
+        public async UniTask<(bool IsValid, T Context)> AsyncPreviewRun(T context, Command<T> command, bool runAfterEvents = true)
+        {
+            if (context == null || command == null)
+                return (false, null);
+
+            var session = new PreviewSession();
+            var clone = session.GetClone(context);
+            var original = command.Context;
+            command.Context = clone;
+
+            try
+            {
+                if (_editAsyncEvent != null)
+                    await InvokeSequentialAsync(_editAsyncEvent, clone);
+
+                bool valid = RunSyncCore(clone, command);
+                if (!valid)
+                    return (false, clone);
+
+                await RunFrontEndAndAfterAsync(clone, runAfterEvents);
+                return (true, clone);
+            }
+            finally
+            {
+                command.Context = original;
+            }
+        }
+
+        private bool RunSyncCore(T context, Command<T> command)
+        {
+            _editEvent?.Invoke(context);
+
+            if (RuntimeDataReflection.HasNullCheckViolation(context, out var nullField))
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[{CommandName}] NullCheck 실패: '{nullField}' 필드가 null이라 커맨드를 중단합니다.");
+                return false;
+            }
+
+            if (_validationEvent != null)
+            {
+                foreach (var handler in _validationEvent.GetInvocationList()
+                             .Cast<ValidationEventHandler>())
+                {
+                    if (!handler(context))
+                        return false;
+                }
+            }
+
+            if (!command.ValidateInCommand())
+                return false;
+
+            return command.Logic();
+        }
+
+        private async UniTask RunFrontEndAndAfterAsync(T context, bool runAfterEvents)
+        {
+            if (_beforeFrontEndAsyncEvent != null)
+                await InvokeSequentialAsync(_beforeFrontEndAsyncEvent, context);
+
+            InvokeSequential(_beforeFrontEndEvent, context);
+
+            if (_frontEndAsyncEvent != null)
+                await InvokeSequentialAsync(_frontEndAsyncEvent, context);
+
+            InvokeSequential(_frontEndEvent, context);
+
+            if (!runAfterEvents)
+                return;
+
+            if (_afterAsyncEvent != null)
+                await InvokeSequentialAsync(_afterAsyncEvent, context);
+
+            InvokeSequential(_afterEvent, context);
         }
 
         // ── 헬퍼 ───────────────────────────────────────────────────────
