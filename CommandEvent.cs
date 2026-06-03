@@ -138,10 +138,10 @@ namespace Sinsam.CommandFramework
             }
             finally
             {
+                await session.ExitCommandAsync(success && shouldDrainAfterCommands);
+
                 if (!preview)
                     context?.ResetContext();
-
-                await session.ExitCommandAsync(success && shouldDrainAfterCommands);
             }
         }
 
