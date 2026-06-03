@@ -4,19 +4,10 @@ namespace Sinsam.CommandFramework
 {
     /// <summary>
     /// 커맨드 패턴 베이스.
-    /// - Hemi: 제네릭 단일 계층, Context를 타입 안전하게 노출
-    /// - PRC:  ValidateInCommand()로 커맨드 자체 검증 지원
-    ///
-    /// 사용법:
-    ///   var cmd = new AttackCommand { Context = new HealthCommandContext(...) };
-    ///   bool success = await cmd.Execute();
-    ///
-    /// 파이프라인 순서:
-    ///   EditAsync → Edit → Validation → ValidateInCommand
-    ///   → Logic
-    ///   → BeforeFrontEndAsync → BeforeFrontEnd → FrontEndAsync → FrontEnd → AfterAsync → After
+    /// - 제네릭 단일 계층으로 Context를 타입 안전하게 노출한다.
+    /// - CommandSession을 통해 nested command, preview clone, after command chain을 같은 실행 수명으로 묶는다.
     /// </summary>
-    public abstract class Command<T> where T : class, ICommandContext
+    public abstract class Command<T> : ICommand where T : class, ICommandContext
     {
         public T Context { get; set; }
 
@@ -32,30 +23,35 @@ namespace Sinsam.CommandFramework
 
         /// <summary>
         /// 실제 비즈니스 로직. 서브클래스에서 구현.
-        /// 동기 PreviewRun을 유지하기 위해 sync로 작성한다.
-        /// 비동기 대기가 필요한 경우 EditAsync / BeforeFrontEndAsync 등 이벤트 레이어 또는 AsyncPreview를 사용할 것.
+        /// Preview 안정성을 위해 Logic은 Context/RuntimeData graph 중심으로만 상태를 변경해야 한다.
+        /// UnityEngine.Object, singleton, static state에 대한 직접 side effect는 금지한다.
         /// </summary>
         public abstract bool Logic();
 
         /// <summary>
         /// 커맨드 실행 진입점.
-        /// Context가 이미 Preview 사본(IsPreview=true)이면 commit 없이 preview 경로로 실행된다.
+        /// Context에 이미 CommandSession이 있으면 해당 session에 합류한다.
+        /// Context가 Preview 사본이면 preview session으로 실행된다.
         /// </summary>
         public UniTask<bool> Execute()
         {
+            var session = CommandSession.Resolve(Context, Context != null && Context.IsPreview);
+            return Execute(session);
+        }
+
+        /// <summary>
+        /// 외부에서 제공된 CommandSession 안에서 실행한다.
+        /// AfterCommand queue drain과 SessionEnded 발행은 최상위 command 종료 시 session이 관리한다.
+        /// </summary>
+        public UniTask<bool> Execute(CommandSession session)
+        {
             var commandEvent = CommandEventRegistry.GetOrCreate<T>(GetType());
-            if (Context != null && Context.IsPreview)
-            {
-                return commandEvent.RunInternal(Context, this, preview: true);
-            }
-            return commandEvent.Run(Context, this);
+            return commandEvent.Run(Context, this, session);
         }
 
         /// <summary>
         /// 실제 데이터를 깊은 복사한 Preview 사본에 Logic까지의 파이프라인을 적용해 최종 상태를 미리 본다.
-        /// 실제 Context/엔티티는 변경되지 않으므로 ResetContext 호출이 필요 없다.
-        /// 반환되는 Context는 효과가 적용된 사본(PreviewInstance)이다.
-        /// Logic이 sync이므로 Preview는 항상 동기적으로 완료된다.
+        /// 실제 Context/엔티티는 변경되지 않는다.
         /// </summary>
         public (bool IsValid, T Context) Preview()
         {
@@ -64,13 +60,14 @@ namespace Sinsam.CommandFramework
         }
 
         /// <summary>
-        /// 실제 데이터를 깊은 복사한 Preview 사본에 async/front-end 이벤트까지 포함해 파이프라인을 적용한다.
-        /// runAfterEvents=true면 AfterAsync/After까지 preview context로 발행된다.
+        /// EditAsync까지 포함해 preview 파이프라인을 실행한다.
+        /// FrontEnd/After event는 실행하지 않는다.
+        /// afterMode에 따라 AfterCommand를 수집하거나 preview session 위에서 시뮬레이션할 수 있다.
         /// </summary>
-        public UniTask<(bool IsValid, T Context)> AsyncPreview(bool runAfterEvents = true)
+        public UniTask<(bool IsValid, T Context)> AsyncPreview(PreviewAfterMode afterMode = PreviewAfterMode.None)
         {
             var commandEvent = CommandEventRegistry.GetOrCreate<T>(GetType());
-            return commandEvent.AsyncPreviewRun(Context, this, runAfterEvents);
+            return commandEvent.AsyncPreviewRun(Context, this, afterMode);
         }
     }
 }
