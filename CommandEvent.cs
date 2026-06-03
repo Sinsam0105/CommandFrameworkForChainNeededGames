@@ -12,40 +12,88 @@ namespace Sinsam.CommandFramework
 
     /// <summary>
     /// 커맨드 실행 파이프라인.
+    ///
+    /// 실행 순서:
+    ///   [Preview 포함]
+    ///     EditAsync (Preview 스킵) → Edit → ValidationAsync → Validation
+    ///     → ValidateInCommand → Logic
+    ///   [Preview 스킵]
+    ///     → BeforeFrontEndAsync → BeforeFrontEnd
+    ///     → FrontEndAsync → FrontEnd
+    ///     → AfterAsync → After
+    ///
+    /// Async 이벤트는 UniTask&lt;bool&gt; 반환. false 반환 시 파이프라인 중단.
+    /// Sync 이벤트는 void 반환(Validation 제외).
     /// </summary>
     public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     {
         public string CommandName { get; set; } = string.Empty;
         public Type ContextType => typeof(T);
 
+        // ── Delegate 정의 ──────────────────────────────────────────────
+        public delegate UniTask<bool> AsyncValidationEventHandler(T context);
         public delegate bool ValidationEventHandler(T context);
+        public delegate UniTask AsyncEventHandler(T context);
         public delegate void EditEventHandler(T context);
-        public delegate void ResolveEventHandler(T context);
         public delegate void CommandEventHandler(T context);
 
-        private ValidationEventHandler _validationEvent;
+        // ── Async 이벤트 ───────────────────────────────────────────────
+        private AsyncEventHandler _editAsyncEvent;
+        private AsyncValidationEventHandler _validationAsyncEvent;
+        private AsyncEventHandler _beforeFrontEndAsyncEvent;
+        private AsyncEventHandler _frontEndAsyncEvent;
+        private AsyncEventHandler _afterAsyncEvent;
+
+        // ── Sync 이벤트 ────────────────────────────────────────────────
         private EditEventHandler _editEvent;
-        private ResolveEventHandler _resolveEvent;
+        private ValidationEventHandler _validationEvent;
         private CommandEventHandler _beforeFrontEndEvent;
         private CommandEventHandler _frontEndEvent;
         private CommandEventHandler _afterEvent;
 
-        public event ValidationEventHandler ValidationEvent
+        // ── Async 이벤트 등록 ──────────────────────────────────────────
+        /// <summary>선택 대기, 외부 입력 주입 등. Preview에서 스킵된다.</summary>
+        public event AsyncEventHandler EditAsyncEvent
         {
-            add => _validationEvent += value;
-            remove => _validationEvent -= value;
+            add => _editAsyncEvent += value;
+            remove => _editAsyncEvent -= value;
         }
 
+        public event AsyncValidationEventHandler ValidationAsyncEvent
+        {
+            add => _validationAsyncEvent += value;
+            remove => _validationAsyncEvent -= value;
+        }
+
+        public event AsyncEventHandler BeforeFrontEndAsyncEvent
+        {
+            add => _beforeFrontEndAsyncEvent += value;
+            remove => _beforeFrontEndAsyncEvent -= value;
+        }
+
+        public event AsyncEventHandler FrontEndAsyncEvent
+        {
+            add => _frontEndAsyncEvent += value;
+            remove => _frontEndAsyncEvent -= value;
+        }
+
+        public event AsyncEventHandler AfterAsyncEvent
+        {
+            add => _afterAsyncEvent += value;
+            remove => _afterAsyncEvent -= value;
+        }
+
+        // ── Sync 이벤트 등록 ───────────────────────────────────────────
         public event EditEventHandler EditEvent
         {
             add => _editEvent += value;
             remove => _editEvent -= value;
         }
 
-        public event ResolveEventHandler ResolveEvent
+        public event ValidationEventHandler ValidationEvent
         {
-            add => _resolveEvent += value;
-            remove => _resolveEvent -= value;
+            add => _validationEvent += value;
+            remove => _validationEvent -= value;
         }
 
         public event CommandEventHandler BeforeFrontEndEvent
@@ -66,6 +114,7 @@ namespace Sinsam.CommandFramework
             remove => _afterEvent -= value;
         }
 
+        // ── 실행 ───────────────────────────────────────────────────────
         public UniTask<bool> Run(T context, Command<T> command)
             => RunInternal(context, command, preview: false);
 
@@ -74,6 +123,12 @@ namespace Sinsam.CommandFramework
             if (preview) CommandPreviewScope.Enter();
             try
             {
+                // EditAsync: 선택 대기 등 비동기 주입. Preview에서는 스킵.
+                if (!preview && _editAsyncEvent != null)
+                {
+                    await InvokeSequentialAsync(_editAsyncEvent, context);
+                }
+
                 _editEvent?.Invoke(context);
 
                 if (RuntimeDataReflection.HasNullCheckViolation(context, out var nullField))
@@ -83,39 +138,47 @@ namespace Sinsam.CommandFramework
                     return false;
                 }
 
+                // ValidationAsync
+                if (_validationAsyncEvent != null)
+                {
+                    if (!await InvokeValidationAsync(_validationAsyncEvent, context))
+                        return false;
+                }
+
+                // Validation (sync)
                 if (_validationEvent != null)
                 {
                     foreach (var handler in _validationEvent.GetInvocationList()
                                  .Cast<ValidationEventHandler>())
                     {
                         if (!handler(context))
-                        {
                             return false;
-                        }
                     }
                 }
 
                 if (!command.ValidateInCommand())
-                {
                     return false;
-                }
 
-                if (!preview)
-                {
-                    InvokeSequential(_beforeFrontEndEvent, context);
-                }
-
-                _resolveEvent?.Invoke(context);
-
-                bool result = await command.Logic();
+                // Logic (sync) — Preview는 여기까지
+                bool result = command.Logic();
                 if (!result)
-                {
                     return false;
-                }
 
                 if (!preview)
                 {
+                    if (_beforeFrontEndAsyncEvent != null)
+                        await InvokeSequentialAsync(_beforeFrontEndAsyncEvent, context);
+
+                    InvokeSequential(_beforeFrontEndEvent, context);
+
+                    if (_frontEndAsyncEvent != null)
+                        await InvokeSequentialAsync(_frontEndAsyncEvent, context);
+
                     InvokeSequential(_frontEndEvent, context);
+
+                    if (_afterAsyncEvent != null)
+                        await InvokeSequentialAsync(_afterAsyncEvent, context);
+
                     InvokeSequential(_afterEvent, context);
                 }
 
@@ -134,12 +197,14 @@ namespace Sinsam.CommandFramework
             }
         }
 
+        /// <summary>
+        /// Logic이 sync이므로 Preview는 항상 동기적으로 완료된다.
+        /// EditAsync는 스킵되므로 Context에 이미 필요한 값이 채워진 상태여야 한다.
+        /// </summary>
         public (bool IsValid, T Context) PreviewRun(T context, Command<T> command)
         {
             if (context == null)
-            {
                 return (false, null);
-            }
 
             CommandPreviewScope.Enter();
             try
@@ -149,20 +214,16 @@ namespace Sinsam.CommandFramework
                 command.Context = clone;
                 try
                 {
-                    // Preview는 동기를 전제로 한다. AsyncLocal 기반 PreviewScope는 await 경계를
-                    // 넘어 유지되지 않으므로, Logic이 실제로 await하면 중첩 커맨드가 preview가 아닌
-                    // 실제 데이터를 건드릴 수 있다(또는 GetResult가 미완료 task를 블로킹).
-                    // 따라서 Logic 호출 직후 즉시 완료됐는지 확인하고, 아니면 조용한 오염 대신
-                    // 시끄러운 실패(throw)로 바꾼다.
                     var runTask = RunInternal(clone, command, preview: true);
+
+                    // Logic が sync である限り、EditAsync・FrontEnd 系はすべてスキップされるため
+                    // UniTask は即座に完了する。万が一完了していない場合は設計違反として例外を投げる。
                     if (!runTask.Status.IsCompleted())
                     {
                         throw new InvalidOperationException(
-                            $"[{CommandName}] Preview Logic은 동기적으로 완료되어야 합니다. " +
-                            $"Logic()이 preview 도중 실제 비동기 작업(await)을 수행했습니다. " +
-                            $"AsyncLocal 기반 PreviewScope는 await 경계를 넘어 유지되지 않으므로, " +
-                            $"중첩 커맨드가 preview가 아닌 실제 데이터를 건드릴 수 있습니다. " +
-                            $"preview 대상 Logic은 즉시 완료되도록(동기) 작성하세요.");
+                            $"[{CommandName}] Preview 실행이 동기적으로 완료되지 않았습니다. " +
+                            $"Logic()은 sync여야 하며, ValidationAsync 등 preview에서 실행되는 " +
+                            $"이벤트 핸들러가 실제 await를 수행해선 안 됩니다.");
                     }
 
                     bool valid = runTask.GetAwaiter().GetResult();
@@ -179,17 +240,32 @@ namespace Sinsam.CommandFramework
             }
         }
 
+        // ── 헬퍼 ───────────────────────────────────────────────────────
         private static void InvokeSequential(CommandEventHandler evt, T context)
         {
-            if (evt == null)
-            {
-                return;
-            }
-
+            if (evt == null) return;
             foreach (CommandEventHandler handler in evt.GetInvocationList())
-            {
                 handler(context);
+        }
+
+        private static async UniTask InvokeSequentialAsync(AsyncEventHandler evt, T context)
+        {
+            if (evt == null) return;
+            foreach (AsyncEventHandler handler in evt.GetInvocationList())
+                await handler(context);
+        }
+
+        /// <summary>ValidationAsync: false 반환 시 즉시 중단(short-circuit).</summary>
+        private static async UniTask<bool> InvokeValidationAsync(AsyncValidationEventHandler evt, T context)
+        {
+            if (evt == null) return true;
+            foreach (AsyncValidationEventHandler handler in evt.GetInvocationList()
+                         .Cast<AsyncValidationEventHandler>())
+            {
+                if (!await handler(context))
+                    return false;
             }
+            return true;
         }
     }
 }
