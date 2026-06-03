@@ -15,15 +15,12 @@ namespace Sinsam.CommandFramework
     ///
     /// 실행 순서:
     ///   [Preview 포함]
-    ///     EditAsync (Preview 스킵) → Edit → ValidationAsync → Validation
+    ///     EditAsync (Preview 스킵) → Edit → Validation
     ///     → ValidateInCommand → Logic
     ///   [Preview 스킵]
     ///     → BeforeFrontEndAsync → BeforeFrontEnd
     ///     → FrontEndAsync → FrontEnd
     ///     → AfterAsync → After
-    ///
-    /// Async 이벤트는 UniTask&lt;bool&gt; 반환. false 반환 시 파이프라인 중단.
-    /// Sync 이벤트는 void 반환(Validation 제외).
     /// </summary>
     public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     {
@@ -31,7 +28,6 @@ namespace Sinsam.CommandFramework
         public Type ContextType => typeof(T);
 
         // ── Delegate 정의 ──────────────────────────────────────────────
-        public delegate UniTask<bool> AsyncValidationEventHandler(T context);
         public delegate bool ValidationEventHandler(T context);
         public delegate UniTask AsyncEventHandler(T context);
         public delegate void EditEventHandler(T context);
@@ -39,7 +35,6 @@ namespace Sinsam.CommandFramework
 
         // ── Async 이벤트 ───────────────────────────────────────────────
         private AsyncEventHandler _editAsyncEvent;
-        private AsyncValidationEventHandler _validationAsyncEvent;
         private AsyncEventHandler _beforeFrontEndAsyncEvent;
         private AsyncEventHandler _frontEndAsyncEvent;
         private AsyncEventHandler _afterAsyncEvent;
@@ -57,12 +52,6 @@ namespace Sinsam.CommandFramework
         {
             add => _editAsyncEvent += value;
             remove => _editAsyncEvent -= value;
-        }
-
-        public event AsyncValidationEventHandler ValidationAsyncEvent
-        {
-            add => _validationAsyncEvent += value;
-            remove => _validationAsyncEvent -= value;
         }
 
         public event AsyncEventHandler BeforeFrontEndAsyncEvent
@@ -120,9 +109,28 @@ namespace Sinsam.CommandFramework
 
         internal async UniTask<bool> RunInternal(T context, Command<T> command, bool preview)
         {
+            if (context == null || command == null)
+                return false;
+
+            T originalCommandContext = null;
+            bool restoreCommandContext = false;
+
             if (preview) CommandPreviewScope.Enter();
             try
             {
+                // PreviewScope 안에서 실제 Context가 들어오면 같은 Snapshot registry를 통해 자동으로 사본으로 치환한다.
+                if (preview && !context.IsPreview)
+                {
+                    var snapshot = CommandPreviewScope.Snapshot;
+                    if (snapshot != null)
+                    {
+                        originalCommandContext = command.Context;
+                        context = snapshot.GetClone(context);
+                        command.Context = context;
+                        restoreCommandContext = true;
+                    }
+                }
+
                 // EditAsync: 선택 대기 등 비동기 주입. Preview에서는 스킵.
                 if (!preview && _editAsyncEvent != null)
                 {
@@ -136,13 +144,6 @@ namespace Sinsam.CommandFramework
                     UnityEngine.Debug.LogWarning(
                         $"[{CommandName}] NullCheck 실패: '{nullField}' 필드가 null이라 커맨드를 중단합니다.");
                     return false;
-                }
-
-                // ValidationAsync
-                if (_validationAsyncEvent != null)
-                {
-                    if (!await InvokeValidationAsync(_validationAsyncEvent, context))
-                        return false;
                 }
 
                 // Validation (sync)
@@ -186,6 +187,9 @@ namespace Sinsam.CommandFramework
             }
             finally
             {
+                if (restoreCommandContext)
+                    command.Context = originalCommandContext;
+
                 if (preview)
                 {
                     CommandPreviewScope.Exit();
@@ -203,7 +207,7 @@ namespace Sinsam.CommandFramework
         /// </summary>
         public (bool IsValid, T Context) PreviewRun(T context, Command<T> command)
         {
-            if (context == null)
+            if (context == null || command == null)
                 return (false, null);
 
             CommandPreviewScope.Enter();
@@ -216,14 +220,13 @@ namespace Sinsam.CommandFramework
                 {
                     var runTask = RunInternal(clone, command, preview: true);
 
-                    // Logic が sync である限り、EditAsync・FrontEnd 系はすべてスキップされるため
-                    // UniTask は即座に完了する。万が一完了していない場合は設計違反として例外を投げる。
+                    // Logic이 sync이고 Preview에서는 async/front-end 계열이 스킵되므로 즉시 완료되어야 한다.
+                    // 완료되지 않았다면 Preview 파이프라인 설계 위반으로 본다.
                     if (!runTask.Status.IsCompleted())
                     {
                         throw new InvalidOperationException(
                             $"[{CommandName}] Preview 실행이 동기적으로 완료되지 않았습니다. " +
-                            $"Logic()은 sync여야 하며, ValidationAsync 등 preview에서 실행되는 " +
-                            $"이벤트 핸들러가 실제 await를 수행해선 안 됩니다.");
+                            $"Logic()은 sync여야 하며, Preview 파이프라인이 실제 await를 수행해선 안 됩니다.");
                     }
 
                     bool valid = runTask.GetAwaiter().GetResult();
@@ -253,19 +256,6 @@ namespace Sinsam.CommandFramework
             if (evt == null) return;
             foreach (AsyncEventHandler handler in evt.GetInvocationList())
                 await handler(context);
-        }
-
-        /// <summary>ValidationAsync: false 반환 시 즉시 중단(short-circuit).</summary>
-        private static async UniTask<bool> InvokeValidationAsync(AsyncValidationEventHandler evt, T context)
-        {
-            if (evt == null) return true;
-            foreach (AsyncValidationEventHandler handler in evt.GetInvocationList()
-                         .Cast<AsyncValidationEventHandler>())
-            {
-                if (!await handler(context))
-                    return false;
-            }
-            return true;
         }
     }
 }
