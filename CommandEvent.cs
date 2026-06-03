@@ -18,7 +18,7 @@ namespace Sinsam.CommandFramework
     ///   EditAsync → Edit → Validation → ValidateInCommand → Logic
     ///   → BeforeFrontEndAsync → BeforeFrontEnd
     ///   → FrontEndAsync → FrontEnd
-    ///   → AfterCommands 수집 → CommandSession queue drain → SessionEnded
+    ///   → AfterCommands 수집 → OneCommand Reset → CommandSession queue drain → SessionEnded
     ///
     /// PreviewRun은 Edit → Validation → ValidateInCommand → Logic까지만 실행한다.
     /// AsyncPreviewRun은 EditAsync까지 포함하며, PreviewAfterMode에 따라 AfterCommands를 수집/시뮬레이션한다.
@@ -138,10 +138,10 @@ namespace Sinsam.CommandFramework
             }
             finally
             {
-                await session.ExitCommandAsync(success && shouldDrainAfterCommands);
-
                 if (!preview)
                     context?.ResetContext();
+
+                await session.ExitCommandAsync(success && shouldDrainAfterCommands);
             }
         }
 
