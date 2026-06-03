@@ -19,7 +19,7 @@ namespace Sinsam.CommandFramework
 
     /// <summary>
     /// CommandContext나 RuntimeData가 자신이 속한 CommandSession을 들고 있을 때 구현한다.
-    /// Context에 이미 session이 있으면 새 session을 만들지 않고 기존 chain에 합류한다.
+    /// Context에 이미 살아있는 session이 있으면 새 session을 만들지 않고 기존 chain에 합류한다.
     /// </summary>
     public interface ICommandSessionCarrier
     {
@@ -74,7 +74,7 @@ namespace Sinsam.CommandFramework
 
         public static CommandSession Resolve(ICommandContext context, bool isPreview = false, PreviewAfterMode previewAfterMode = PreviewAfterMode.None)
         {
-            if (context is ICommandSessionCarrier carrier && carrier.CommandSession != null)
+            if (context is ICommandSessionCarrier carrier && carrier.CommandSession != null && !carrier.CommandSession.IsEnded)
                 return carrier.CommandSession;
 
             var session = new CommandSession(isPreview, previewAfterMode);
