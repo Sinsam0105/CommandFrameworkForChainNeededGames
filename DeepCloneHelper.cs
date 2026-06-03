@@ -25,7 +25,7 @@ namespace Sinsam.CommandFramework
     ///
     /// 순환 참조와 공유 참조는 visited 맵으로 보존한다.
     /// markPreview=true면 복제된 모든 IPreviewable의 IsPreview를 true로 설정한다.
-    /// PreviewSession이 제공되면 복제된 모든 IPreviewSessionCarrier에 같은 session을 주입한다.
+    /// CommandSession이 제공되면 복제된 모든 ICommandSessionCarrier에 같은 session을 주입한다.
     /// 일반 class 복제는 FormatterServices.GetUninitializedObject로 생성자를 우회한다.
     /// Unity IL2CPP/AOT 환경에서는 이 경로의 호환성을 프로젝트 단위로 검증해야 한다.
     /// </summary>
@@ -49,10 +49,10 @@ namespace Sinsam.CommandFramework
         }
 
         /// <summary>
-        /// 외부 registry와 PreviewSession을 공유해 복제한다.
-        /// PreviewSession은 복제된 IPreviewSessionCarrier에 자동 주입된다.
+        /// 외부 registry와 CommandSession을 공유해 복제한다.
+        /// CommandSession은 복제된 ICommandSessionCarrier에 자동 주입된다.
         /// </summary>
-        public static T AutoClone<T>(T source, bool markPreview, IDictionary<object, object> registry, PreviewSession session)
+        public static T AutoClone<T>(T source, bool markPreview, IDictionary<object, object> registry, CommandSession session)
         {
             return (T)CloneObject(source, registry, markPreview, session);
         }
@@ -61,7 +61,7 @@ namespace Sinsam.CommandFramework
         public static IDictionary<object, object> NewRegistry()
             => new Dictionary<object, object>(ReferenceEqualityComparer.Instance);
 
-        private static object CloneObject(object source, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneObject(object source, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             if (source == null)
                 return null;
@@ -99,7 +99,7 @@ namespace Sinsam.CommandFramework
             return clone;
         }
 
-        private static Array CloneArray(Array source, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static Array CloneArray(Array source, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             var clonedArray = Array.CreateInstance(source.GetType().GetElementType(), source.Length);
             visited[source] = clonedArray;
@@ -108,7 +108,7 @@ namespace Sinsam.CommandFramework
             return clonedArray;
         }
 
-        private static object CloneList(IList source, Type type, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneList(IList source, Type type, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             var clone = (IList)CreateCollectionInstance(type);
             visited[source] = clone;
@@ -118,7 +118,7 @@ namespace Sinsam.CommandFramework
             return clone;
         }
 
-        private static object CloneDictionary(IDictionary source, Type type, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneDictionary(IDictionary source, Type type, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             var clone = (IDictionary)CreateCollectionInstance(type);
             visited[source] = clone;
@@ -132,7 +132,7 @@ namespace Sinsam.CommandFramework
             return clone;
         }
 
-        private static object CloneSet(IEnumerable source, Type type, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneSet(IEnumerable source, Type type, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             var clone = CreateCollectionInstance(type);
             visited[source] = clone;
@@ -174,7 +174,7 @@ namespace Sinsam.CommandFramework
             throw new InvalidOperationException($"Collection type '{type.FullName}' cannot be cloned automatically.");
         }
 
-        private static object CloneStruct(object source, Type type, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneStruct(object source, Type type, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             object boxed = source;
             foreach (var field in type.GetFields(Flags))
@@ -200,7 +200,7 @@ namespace Sinsam.CommandFramework
             return boxed;
         }
 
-        private static void CloneFields(object source, object clone, Type type, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static void CloneFields(object source, object clone, Type type, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
             {
@@ -228,7 +228,7 @@ namespace Sinsam.CommandFramework
             }
         }
 
-        private static object CloneFieldValue(FieldInfo field, object value, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneFieldValue(FieldInfo field, object value, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             if (field.IsDefined(typeof(SelfCloneAttribute), true))
                 return CloneBySelfClone(value, visited, markPreview, session);
@@ -236,7 +236,7 @@ namespace Sinsam.CommandFramework
             return CloneObject(value, visited, markPreview, session);
         }
 
-        private static object CloneBySelfClone(object source, IDictionary<object, object> visited, bool markPreview, PreviewSession session)
+        private static object CloneBySelfClone(object source, IDictionary<object, object> visited, bool markPreview, CommandSession session)
         {
             if (source == null)
                 return null;
@@ -257,13 +257,13 @@ namespace Sinsam.CommandFramework
             return clone;
         }
 
-        private static void MarkPreview(object instance, bool markPreview, PreviewSession session)
+        private static void MarkPreview(object instance, bool markPreview, CommandSession session)
         {
             if (markPreview && instance is IPreviewable previewable)
                 previewable.IsPreview = true;
 
-            if (session != null && instance is IPreviewSessionCarrier carrier)
-                carrier.PreviewSession = session;
+            if (session != null && instance is ICommandSessionCarrier carrier)
+                carrier.CommandSession = session;
         }
 
         private static bool IsSetType(Type type)
