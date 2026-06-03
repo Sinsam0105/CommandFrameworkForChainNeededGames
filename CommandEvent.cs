@@ -154,7 +154,7 @@ namespace Sinsam.CommandFramework
             if (context == null || command == null)
                 return (false, null);
 
-            var session = CommandSession.Resolve(context, isPreview: true, PreviewAfterMode.None);
+            var session = CreatePreviewSession(context, PreviewAfterMode.None);
             var clone = session.GetPreviewClone(context);
             var original = command.Context;
             command.Context = clone;
@@ -185,7 +185,7 @@ namespace Sinsam.CommandFramework
             if (context == null || command == null)
                 return (false, null);
 
-            var session = CommandSession.Resolve(context, isPreview: true, afterMode);
+            var session = CreatePreviewSession(context, afterMode);
             var clone = session.GetPreviewClone(context);
             var original = command.Context;
             command.Context = clone;
@@ -215,6 +215,14 @@ namespace Sinsam.CommandFramework
             {
                 command.Context = original;
             }
+        }
+
+        private static CommandSession CreatePreviewSession(T context, PreviewAfterMode afterMode)
+        {
+            if (context is ICommandSessionCarrier carrier && carrier.CommandSession != null && carrier.CommandSession.IsPreview)
+                return carrier.CommandSession;
+
+            return new CommandSession(isPreview: true, previewAfterMode: afterMode);
         }
 
         private bool RunSyncCore(T context, Command<T> command)
