@@ -9,7 +9,14 @@ namespace Sinsam.CommandFramework
     /// </summary>
     public interface ICommandContext : IPreviewable
     {
-        void ResetContext();
-        void SetContext();
+        void ResetContext()
+        {
+            RuntimeDataReflection.ForEachEffectable(this, e => e.Reset());
+        }
+
+        void SetContext()
+        {
+            RuntimeDataReflection.ForEachEffectable(this, e => e.Set());
+        }
     }
 }
