@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
 
@@ -17,36 +18,33 @@ namespace Sinsam.CommandFramework
     ///   EditAsync → Edit → Validation → ValidateInCommand → Logic
     ///   → BeforeFrontEndAsync → BeforeFrontEnd
     ///   → FrontEndAsync → FrontEnd
-    ///   → AfterAsync → After
+    ///   → AfterCommands 수집 → CommandSession queue drain → SessionEnded
     ///
     /// PreviewRun은 Edit → Validation → ValidateInCommand → Logic까지만 실행한다.
-    /// AsyncPreviewRun은 EditAsync와 front-end 계열을 포함하며, 옵션에 따라 After 계열까지 실행한다.
+    /// AsyncPreviewRun은 EditAsync까지 포함하며, PreviewAfterMode에 따라 AfterCommands를 수집/시뮬레이션한다.
+    /// FrontEnd/After side-effect event는 preview에서 실행하지 않는다.
     /// </summary>
     public class CommandEvent<T> : ICommandEvent where T : class, ICommandContext
     {
         public string CommandName { get; set; } = string.Empty;
         public Type ContextType => typeof(T);
 
-        // ── Delegate 정의 ──────────────────────────────────────────────
         public delegate bool ValidationEventHandler(T context);
         public delegate UniTask AsyncEventHandler(T context);
         public delegate void EditEventHandler(T context);
         public delegate void CommandEventHandler(T context);
+        public delegate IEnumerable<ICommand> AfterCommandHandler(T context, CommandSession session);
 
-        // ── Async 이벤트 ───────────────────────────────────────────────
         private AsyncEventHandler _editAsyncEvent;
         private AsyncEventHandler _beforeFrontEndAsyncEvent;
         private AsyncEventHandler _frontEndAsyncEvent;
-        private AsyncEventHandler _afterAsyncEvent;
 
-        // ── Sync 이벤트 ────────────────────────────────────────────────
         private EditEventHandler _editEvent;
         private ValidationEventHandler _validationEvent;
         private CommandEventHandler _beforeFrontEndEvent;
         private CommandEventHandler _frontEndEvent;
-        private CommandEventHandler _afterEvent;
+        private AfterCommandHandler _afterCommandsEvent;
 
-        // ── Async 이벤트 등록 ──────────────────────────────────────────
         /// <summary>선택 대기, 외부 입력 주입 등. 기본 PreviewRun에서는 스킵되고 AsyncPreviewRun에서는 실행된다.</summary>
         public event AsyncEventHandler EditAsyncEvent
         {
@@ -66,13 +64,6 @@ namespace Sinsam.CommandFramework
             remove => _frontEndAsyncEvent -= value;
         }
 
-        public event AsyncEventHandler AfterAsyncEvent
-        {
-            add => _afterAsyncEvent += value;
-            remove => _afterAsyncEvent -= value;
-        }
-
-        // ── Sync 이벤트 등록 ───────────────────────────────────────────
         public event EditEventHandler EditEvent
         {
             add => _editEvent += value;
@@ -97,32 +88,51 @@ namespace Sinsam.CommandFramework
             remove => _frontEndEvent -= value;
         }
 
-        public event CommandEventHandler AfterEvent
+        /// <summary>
+        /// 현재 command 이후 이어질 후속 command들을 생성한다.
+        /// 직접 side effect를 수행하지 말고 Command를 반환해야 한다.
+        /// </summary>
+        public event AfterCommandHandler AfterCommands
         {
-            add => _afterEvent += value;
-            remove => _afterEvent -= value;
+            add => _afterCommandsEvent += value;
+            remove => _afterCommandsEvent -= value;
         }
 
-        // ── 실행 ───────────────────────────────────────────────────────
-        public UniTask<bool> Run(T context, Command<T> command)
-            => RunInternal(context, command, preview: false);
-
-        internal async UniTask<bool> RunInternal(T context, Command<T> command, bool preview)
+        public UniTask<bool> Run(T context, Command<T> command, CommandSession session = null)
         {
             if (context == null || command == null)
+                return UniTask.FromResult(false);
+
+            session ??= CommandSession.Resolve(context, context.IsPreview);
+            return RunInternal(context, command, session, preview: session.IsPreview);
+        }
+
+        internal async UniTask<bool> RunInternal(T context, Command<T> command, CommandSession session, bool preview)
+        {
+            if (context == null || command == null || session == null)
                 return false;
+
+            session.EnterCommand(context);
+            bool success = false;
+            bool shouldDrainAfterCommands = !preview || session.PreviewAfterMode == PreviewAfterMode.SimulateCommands;
 
             try
             {
                 if (!preview && _editAsyncEvent != null)
                     await InvokeSequentialAsync(_editAsyncEvent, context);
 
-                bool result = RunSyncCore(context, command);
-                if (!result)
+                var snapshot = session.MutationGuard.Capture(context);
+                success = RunSyncCore(context, command);
+                snapshot.ThrowIfViolated(CommandName);
+
+                if (!success)
                     return false;
 
                 if (!preview)
-                    await RunFrontEndAndAfterAsync(context, runAfterEvents: true);
+                    await RunFrontEndAsync(context);
+
+                if (!preview || session.PreviewAfterMode != PreviewAfterMode.None)
+                    CollectAfterCommands(context, session);
 
                 return true;
             }
@@ -130,26 +140,30 @@ namespace Sinsam.CommandFramework
             {
                 if (!preview)
                     context?.ResetContext();
+
+                await session.ExitCommandAsync(success && shouldDrainAfterCommands);
             }
         }
 
         /// <summary>
         /// Logic이 sync이므로 기본 PreviewRun은 항상 동기적으로 완료된다.
-        /// EditAsync와 front-end 계열은 실행하지 않는다.
+        /// EditAsync, FrontEnd, AfterCommands는 실행하지 않는다.
         /// </summary>
         public (bool IsValid, T Context) PreviewRun(T context, Command<T> command)
         {
             if (context == null || command == null)
                 return (false, null);
 
-            var session = new PreviewSession();
-            var clone = session.GetClone(context);
+            var session = CommandSession.Resolve(context, isPreview: true, PreviewAfterMode.None);
+            var clone = session.GetPreviewClone(context);
             var original = command.Context;
             command.Context = clone;
 
             try
             {
+                var snapshot = session.MutationGuard.Capture(clone);
                 bool valid = RunSyncCore(clone, command);
+                snapshot.ThrowIfViolated(CommandName);
                 return (valid, clone);
             }
             finally
@@ -159,16 +173,20 @@ namespace Sinsam.CommandFramework
         }
 
         /// <summary>
-        /// PreviewSession이 주입된 clone context에서 async/front-end 이벤트까지 포함해 preview 파이프라인을 실행한다.
-        /// runAfterEvents=true면 AfterAsync/After도 preview context를 들고 발행된다.
+        /// EditAsync까지 포함해 preview 파이프라인을 실행한다.
+        /// FrontEnd 이벤트는 실행하지 않는다.
+        /// AfterCommands는 afterMode에 따라 수집 또는 preview session 위에서 시뮬레이션한다.
         /// </summary>
-        public async UniTask<(bool IsValid, T Context)> AsyncPreviewRun(T context, Command<T> command, bool runAfterEvents = true)
+        public async UniTask<(bool IsValid, T Context)> AsyncPreviewRun(
+            T context,
+            Command<T> command,
+            PreviewAfterMode afterMode = PreviewAfterMode.None)
         {
             if (context == null || command == null)
                 return (false, null);
 
-            var session = new PreviewSession();
-            var clone = session.GetClone(context);
+            var session = CommandSession.Resolve(context, isPreview: true, afterMode);
+            var clone = session.GetPreviewClone(context);
             var original = command.Context;
             command.Context = clone;
 
@@ -177,11 +195,20 @@ namespace Sinsam.CommandFramework
                 if (_editAsyncEvent != null)
                     await InvokeSequentialAsync(_editAsyncEvent, clone);
 
+                var snapshot = session.MutationGuard.Capture(clone);
                 bool valid = RunSyncCore(clone, command);
+                snapshot.ThrowIfViolated(CommandName);
+
                 if (!valid)
                     return (false, clone);
 
-                await RunFrontEndAndAfterAsync(clone, runAfterEvents);
+                if (afterMode != PreviewAfterMode.None)
+                    CollectAfterCommands(clone, session);
+
+                if (afterMode == PreviewAfterMode.SimulateCommands)
+                    await session.DrainAfterCommandsAsync();
+
+                await session.EndIfIdleAsync();
                 return (true, clone);
             }
             finally
@@ -217,7 +244,7 @@ namespace Sinsam.CommandFramework
             return command.Logic();
         }
 
-        private async UniTask RunFrontEndAndAfterAsync(T context, bool runAfterEvents)
+        private async UniTask RunFrontEndAsync(T context)
         {
             if (_beforeFrontEndAsyncEvent != null)
                 await InvokeSequentialAsync(_beforeFrontEndAsyncEvent, context);
@@ -228,17 +255,24 @@ namespace Sinsam.CommandFramework
                 await InvokeSequentialAsync(_frontEndAsyncEvent, context);
 
             InvokeSequential(_frontEndEvent, context);
-
-            if (!runAfterEvents)
-                return;
-
-            if (_afterAsyncEvent != null)
-                await InvokeSequentialAsync(_afterAsyncEvent, context);
-
-            InvokeSequential(_afterEvent, context);
         }
 
-        // ── 헬퍼 ───────────────────────────────────────────────────────
+        private void CollectAfterCommands(T context, CommandSession session)
+        {
+            if (_afterCommandsEvent == null)
+                return;
+
+            foreach (AfterCommandHandler handler in _afterCommandsEvent.GetInvocationList())
+            {
+                var commands = handler(context, session);
+                if (commands == null)
+                    continue;
+
+                foreach (var next in commands)
+                    session.EnqueueAfter(next);
+            }
+        }
+
         private static void InvokeSequential(CommandEventHandler evt, T context)
         {
             if (evt == null) return;
