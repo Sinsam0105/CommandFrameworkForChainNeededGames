@@ -65,7 +65,9 @@ namespace Sinsam.CommandFramework
         {
             if (source == null)
                 return null;
-
+            if (source is CommandSession)
+                return session ?? source;
+            
             Type type = source.GetType();
 
             if (type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal))
