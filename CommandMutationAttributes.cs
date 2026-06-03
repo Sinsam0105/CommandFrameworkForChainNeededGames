@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 
 namespace Sinsam.CommandFramework
 {
@@ -87,7 +86,7 @@ namespace Sinsam.CommandFramework
             if (type.IsValueType || before is string)
                 return before.Equals(after);
 
-            return RuntimeHelpers.GetHashCode(before) == RuntimeHelpers.GetHashCode(after) && ReferenceEquals(before, after);
+            return false;
         }
 
         private readonly struct Entry

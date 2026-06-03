@@ -118,10 +118,13 @@ namespace Sinsam.CommandFramework
 
             try
             {
-                if (!preview && _editAsyncEvent != null)
+                // EditAsync/Edit/Logic 전 구간을 동일하게 가드하려면 EditAsync 실행 '이전'에 캡처해야 한다.
+                // 그렇지 않으면 EditAsync만 [CommandReadOnly] 필드를 교체할 수 있는 비대칭이 생긴다.
+                var snapshot = session.MutationGuard.Capture(context);
+
+                if (_editAsyncEvent != null)
                     await InvokeSequentialAsync(_editAsyncEvent, context);
 
-                var snapshot = session.MutationGuard.Capture(context);
                 success = RunSyncCore(context, command);
                 snapshot.ThrowIfViolated(CommandName);
 
@@ -139,7 +142,18 @@ namespace Sinsam.CommandFramework
             finally
             {
                 if (!preview)
-                    context?.ResetContext();
+                {
+                    // ResetContext()가 throw해도 ExitCommandAsync는 반드시 실행되어야 한다.
+                    // 그렇지 않으면 session depth가 줄지 않아 세션이 누수된다.
+                    try
+                    {
+                        context?.ResetContext();
+                    }
+                    catch (Exception resetEx)
+                    {
+                        UnityEngine.Debug.LogException(resetEx);
+                    }
+                }
 
                 await session.ExitCommandAsync(success && shouldDrainAfterCommands);
             }
@@ -159,6 +173,8 @@ namespace Sinsam.CommandFramework
             var original = command.Context;
             command.Context = clone;
 
+            // 실제 실행과 동일한 세션 depth 수명(EnterCommand/ExitCommandAsync)을 적용한다.
+            session.EnterCommand(clone);
             try
             {
                 var snapshot = session.MutationGuard.Capture(clone);
@@ -169,6 +185,11 @@ namespace Sinsam.CommandFramework
             finally
             {
                 command.Context = original;
+
+                // PreviewRun은 EditAsync/FrontEnd/AfterCommands를 실행하지 않으므로
+                // ExitCommandAsync는 depth 감소와 EndIfIdle만 수행하며 동기적으로 완료된다고 가정한다.
+                // (preview 세션에 async SessionEnded 핸들러가 없다는 전제. 위반 시 GetResult가 throw한다.)
+                session.ExitCommandAsync(drainAfterCommands: false).GetAwaiter().GetResult();
             }
         }
 
@@ -192,24 +213,11 @@ namespace Sinsam.CommandFramework
 
             try
             {
-                if (_editAsyncEvent != null)
-                    await InvokeSequentialAsync(_editAsyncEvent, clone);
-
-                var snapshot = session.MutationGuard.Capture(clone);
-                bool valid = RunSyncCore(clone, command);
-                snapshot.ThrowIfViolated(CommandName);
-
-                if (!valid)
-                    return (false, clone);
-
-                if (afterMode != PreviewAfterMode.None)
-                    CollectAfterCommands(clone, session);
-
-                if (afterMode == PreviewAfterMode.SimulateCommands)
-                    await session.DrainAfterCommandsAsync();
-
-                await session.EndIfIdleAsync();
-                return (true, clone);
+                // 실제 실행과 동일한 세션 depth 수명(EnterCommand/ExitCommandAsync) 및
+                // EditAsync/AfterCommands/drain 분기를 그대로 타도록 RunInternal을 재사용한다.
+                // afterMode는 CreatePreviewSession에서 session.PreviewAfterMode로 반영된다.
+                bool valid = await RunInternal(clone, command, session, preview: true);
+                return (valid, clone);
             }
             finally
             {
