@@ -37,4 +37,12 @@ namespace Sinsam.CommandFramework
     /// </summary>
     [AttributeUsage(AttributeTargets.Field, Inherited = true)]
     public sealed class CloneIgnoreAttribute : Attribute { }
+
+    /// <summary>
+    /// 해당 필드 값이 IDeepCloneable이면 자동 reflection clone 대신 DeepClone()을 직접 호출한다.
+    /// 필드별 수동 clone 정책이 필요한 경우 사용한다.
+    /// 자동 프로퍼티에 적용할 때는 [field: SelfClone] 형태로 백킹 필드에 부착할 것.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Field, Inherited = true)]
+    public sealed class SelfCloneAttribute : Attribute { }
 }
