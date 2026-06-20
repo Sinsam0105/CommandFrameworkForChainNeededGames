@@ -39,7 +39,7 @@ namespace Sinsam.CommandFramework
             if (!type.IsValueType && !visited.Add(value))
                 return;
 
-            if (value is IEnumerable enumerable && value is not string)
+            if (value is IEnumerable enumerable && !(value is string))
             {
                 foreach (var item in enumerable)
                     Walk(item, action, visited);
@@ -77,7 +77,7 @@ namespace Sinsam.CommandFramework
 
         private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
         {
-            public static readonly ReferenceEqualityComparer Instance = new();
+            public static readonly ReferenceEqualityComparer Instance = new ReferenceEqualityComparer();
 
             public new bool Equals(object x, object y)
             {
