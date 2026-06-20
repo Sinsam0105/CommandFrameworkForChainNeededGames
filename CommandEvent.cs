@@ -114,43 +114,6 @@ namespace Sinsam.CommandFramework
             }
         }
 
-        public CommandPreviewResult PreviewRun(T context, Command<T> command)
-        {
-            if (context == null || command == null)
-                return CommandPreviewResult.Invalid;
-
-            try
-            {
-                _editEvent?.Invoke(context);
-                bool isValid = RunValidation(context, command);
-                return CommandPreviewResult.FromContext(isValid, context);
-            }
-            finally
-            {
-                context.ResetContext();
-            }
-        }
-
-        public async UniTask<CommandPreviewResult> PreviewAsyncRun(T context, Command<T> command)
-        {
-            if (context == null || command == null)
-                return CommandPreviewResult.Invalid;
-
-            try
-            {
-                if (_editAsyncEvent != null)
-                    await InvokeSequentialAsync(_editAsyncEvent, context);
-
-                _editEvent?.Invoke(context);
-                bool isValid = RunValidation(context, command);
-                return CommandPreviewResult.FromContext(isValid, context);
-            }
-            finally
-            {
-                context.ResetContext();
-            }
-        }
-
         private bool RunValidation(T context, Command<T> command)
         {
             if (_validationEvent != null)
