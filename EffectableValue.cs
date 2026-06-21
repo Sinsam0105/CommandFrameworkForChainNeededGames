@@ -10,6 +10,9 @@ namespace Sinsam.CommandFramework
 
         object BoxedFinalValue { get; }
         Type ValueType { get; }
+
+        object CreateSnapshot();
+        void RestoreSnapshot(object snapshot);
     }
 
     public enum ModifierOp
@@ -103,8 +106,33 @@ namespace Sinsam.CommandFramework
             _modifiers.Clear();
         }
 
+        public object CreateSnapshot()
+        {
+            return new Snapshot
+            {
+                BaseValue = BaseValue,
+                Modifiers = new List<ValueModifier>(_modifiers)
+            };
+        }
+
+        public void RestoreSnapshot(object snapshot)
+        {
+            if (snapshot is not Snapshot typedSnapshot)
+                throw new ArgumentException($"Invalid snapshot type for {GetType().Name}.", nameof(snapshot));
+
+            BaseValue = typedSnapshot.BaseValue;
+            _modifiers.Clear();
+            _modifiers.AddRange(typedSnapshot.Modifiers);
+        }
+
         protected double ToDouble(T value) => Convert.ToDouble(value);
         protected T FromDouble(double value) => (T)Convert.ChangeType(value, typeof(T));
+
+        private sealed class Snapshot
+        {
+            public T BaseValue;
+            public List<ValueModifier> Modifiers;
+        }
     }
 
     [Serializable] public class EffectableInt : EffectableValue<int> { }
@@ -138,6 +166,33 @@ namespace Sinsam.CommandFramework
         {
             BaseValue = FinalValue;
             Reset();
+        }
+
+        public object CreateSnapshot()
+        {
+            return new Snapshot
+            {
+                BaseValue = BaseValue,
+                IsAltered = IsAltered,
+                AlteredValue = AlteredValue
+            };
+        }
+
+        public void RestoreSnapshot(object snapshot)
+        {
+            if (snapshot is not Snapshot typedSnapshot)
+                throw new ArgumentException($"Invalid snapshot type for {GetType().Name}.", nameof(snapshot));
+
+            BaseValue = typedSnapshot.BaseValue;
+            IsAltered = typedSnapshot.IsAltered;
+            AlteredValue = typedSnapshot.AlteredValue;
+        }
+
+        private sealed class Snapshot
+        {
+            public T BaseValue;
+            public bool IsAltered;
+            public T AlteredValue;
         }
     }
 
