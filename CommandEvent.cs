@@ -24,6 +24,8 @@ namespace Sinsam.CommandFramework
 
         private AsyncEventHandler _editAsyncEvent;
         private AsyncEventHandler _frontEndAsyncEvent;
+        private AsyncEventHandler _afterAsyncEvent;
+
         private ValidationEventHandler _validationEvent;
         private EditEventHandler _editEvent;
         private CommandEventHandler _numChangeEvent;
@@ -80,6 +82,16 @@ namespace Sinsam.CommandFramework
             remove => _frontEndEvent -= value;
         }
 
+        /// <summary>
+        /// Logic과 FrontEndEvent 이후에 실행되는 비동기 후처리 이벤트.
+        /// 카드 이동, 상태 정리, 소멸/버림 등 반드시 await되어야 하는 후처리에 사용한다.
+        /// </summary>
+        public event AsyncEventHandler AfterAsyncEvent
+        {
+            add => _afterAsyncEvent += value;
+            remove => _afterAsyncEvent -= value;
+        }
+
         public event CommandEventHandler AfterEvent
         {
             add => _afterEvent += value;
@@ -100,6 +112,7 @@ namespace Sinsam.CommandFramework
                     await InvokeSequentialAsync(_editAsyncEvent, context);
 
                 modifierSnapshot = ModifierIdSnapshot.Capture(context);
+
                 InvokeSequential(_numChangeEvent, context);
 
                 if (!RunValidationOnly(context, command))
@@ -118,6 +131,10 @@ namespace Sinsam.CommandFramework
                     await InvokeSequentialAsync(_frontEndAsyncEvent, context);
 
                 InvokeSequential(_frontEndEvent, context);
+
+                if (_afterAsyncEvent != null)
+                    await InvokeSequentialAsync(_afterAsyncEvent, context);
+
                 InvokeSequential(_afterEvent, context);
 
                 return true;
@@ -158,6 +175,9 @@ namespace Sinsam.CommandFramework
 
         public bool RunValidationOnly(T context, Command<T> command)
         {
+            if (context == null || command == null)
+                return false;
+
             if (!command.ValidateInCommand())
                 return false;
 
@@ -183,8 +203,11 @@ namespace Sinsam.CommandFramework
             try
             {
                 InvokeSequential(_numChangeEvent, context);
+
                 bool isValid = RunValidationOnly(context, command);
+
                 beforeCapture?.Invoke(context, isValid);
+
                 return CommandNumPreviewResult.FromContext(isValid, context);
             }
             finally
