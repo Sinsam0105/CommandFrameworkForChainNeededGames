@@ -5,8 +5,8 @@ namespace Sinsam.CommandFramework
     /// <summary>
     /// Type-safe command base.
     /// Execute runs the full command pipeline.
-    /// Preview is intentionally not part of the command framework.
-    /// Project-specific preview should be implemented outside the package.
+    /// NumPreview is limited to temporary numeric changes and validation.
+    /// Project-specific preview presentation should be implemented outside the package.
     /// </summary>
     public abstract class Command<T> where T : class, ICommandContext
     {

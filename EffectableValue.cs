@@ -13,6 +13,9 @@ namespace Sinsam.CommandFramework
 
         object CreateSnapshot();
         void RestoreSnapshot(object snapshot);
+
+        void CollectModifierIds(HashSet<int> destination);
+        void RemoveModifiersExcept(HashSet<int> preservedIds);
     }
 
     public enum ModifierOp
@@ -30,6 +33,7 @@ namespace Sinsam.CommandFramework
     [Serializable]
     public struct ValueModifier
     {
+        public int Id;
         public ModifierOp Op;
         public double Value;
         public object Source;
@@ -48,6 +52,7 @@ namespace Sinsam.CommandFramework
         public T BaseValue;
 
         private readonly List<ValueModifier> _modifiers = new();
+        private int _nextModifierId = 1;
         public IReadOnlyList<ValueModifier> Modifiers => _modifiers;
 
         public virtual T FinalValue
@@ -73,13 +78,21 @@ namespace Sinsam.CommandFramework
         object IEffectableValue.BoxedFinalValue => FinalValue;
         Type IEffectableValue.ValueType => typeof(T);
 
-        public void Add(ValueModifier modifier) => _modifiers.Add(modifier);
+        public void Add(ValueModifier modifier)
+        {
+            if (modifier.Id == 0)
+                modifier.Id = _nextModifierId++;
+            else if (modifier.Id >= _nextModifierId)
+                _nextModifierId = modifier.Id + 1;
+
+            _modifiers.Add(modifier);
+        }
 
         public void AddAdditive(double value, object source = null, ModifierLifetime life = ModifierLifetime.Permanent)
-            => _modifiers.Add(ValueModifier.Add(value, source, life));
+            => Add(ValueModifier.Add(value, source, life));
 
         public void AddMultiplier(double multiplier, object source = null, ModifierLifetime life = ModifierLifetime.Permanent)
-            => _modifiers.Add(ValueModifier.Mul(multiplier, source, life));
+            => Add(ValueModifier.Mul(multiplier, source, life));
 
         public void RemoveFrom(object source) => _modifiers.RemoveAll(modifier => Equals(modifier.Source, source));
 
@@ -111,7 +124,8 @@ namespace Sinsam.CommandFramework
             return new Snapshot
             {
                 BaseValue = BaseValue,
-                Modifiers = new List<ValueModifier>(_modifiers)
+                Modifiers = new List<ValueModifier>(_modifiers),
+                NextModifierId = _nextModifierId
             };
         }
 
@@ -123,6 +137,33 @@ namespace Sinsam.CommandFramework
             BaseValue = typedSnapshot.BaseValue;
             _modifiers.Clear();
             _modifiers.AddRange(typedSnapshot.Modifiers);
+            _nextModifierId = typedSnapshot.NextModifierId;
+
+            for (int i = 0; i < _modifiers.Count; i++)
+            {
+                if (_modifiers[i].Id >= _nextModifierId)
+                    _nextModifierId = _modifiers[i].Id + 1;
+            }
+        }
+
+        public void CollectModifierIds(HashSet<int> destination)
+        {
+            if (destination == null)
+                return;
+
+            for (int i = 0; i < _modifiers.Count; i++)
+                destination.Add(_modifiers[i].Id);
+        }
+
+        public void RemoveModifiersExcept(HashSet<int> preservedIds)
+        {
+            if (preservedIds == null)
+            {
+                _modifiers.Clear();
+                return;
+            }
+
+            _modifiers.RemoveAll(modifier => !preservedIds.Contains(modifier.Id));
         }
 
         protected double ToDouble(T value) => Convert.ToDouble(value);
@@ -132,6 +173,7 @@ namespace Sinsam.CommandFramework
         {
             public T BaseValue;
             public List<ValueModifier> Modifiers;
+            public int NextModifierId;
         }
     }
 
@@ -186,6 +228,14 @@ namespace Sinsam.CommandFramework
             BaseValue = typedSnapshot.BaseValue;
             IsAltered = typedSnapshot.IsAltered;
             AlteredValue = typedSnapshot.AlteredValue;
+        }
+
+        public void CollectModifierIds(HashSet<int> destination)
+        {
+        }
+
+        public void RemoveModifiersExcept(HashSet<int> preservedIds)
+        {
         }
 
         private sealed class Snapshot

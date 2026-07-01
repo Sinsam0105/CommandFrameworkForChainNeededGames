@@ -2,7 +2,7 @@
   "name": "com.sinsam.command-framework",
   "version": "2.0.0",
   "displayName": "Command Framework",
-  "description": "Command pattern framework with snapshot-based preview",
+  "description": "Command pattern framework with numeric preview transactions",
   "unity": "2021.3",
   "dependencies": {
     "com.cysharp.unitask": "2.0.0"

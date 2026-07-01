@@ -7,11 +7,12 @@ Only `v1-execute-only` is intended for active Project-C development.
 
 ### `v1-execute-only`
 
-**Meaning:** Execute pipeline only. Preview is intentionally removed from the framework.
+**Meaning:** Execute pipeline plus numeric preview transactions.
 
 - `Command<T>` exposes `Execute()` only.
-- `CommandEvent<T>` owns the execution pipeline.
-- Project-specific preview must be implemented outside this package.
+- `CommandEvent<T>` owns the execution pipeline and `NumChangeEvent`.
+- `NumPreview()` / `NumPreviewAsync()` apply temporary numeric changes, validate, capture values, and remove only newly-added modifiers.
+- Project-specific preview presentation must be implemented outside this package.
 - For Project-C, card preview should live in a game-side `CardPreviewSystem` / `CardPreviewResult`.
 
 Current role: **active / recommended**.
@@ -65,8 +66,8 @@ Current role: **archive / preview architecture reference**.
 ## Policy
 
 - Do not build new Project-C gameplay code against archived preview branches.
-- Do not add generic preview features back into the framework unless a concrete game-side need proves it necessary.
-- Keep the framework focused on command execution.
+- Do not add broad gameplay preview features back into the framework unless a concrete game-side need proves it necessary.
+- Keep the framework focused on command execution and numeric preview transactions.
 - Keep card number, damage, heal, cost, and usability previews in Project-C-specific systems.
 
 ## Recommended Project-C dependency

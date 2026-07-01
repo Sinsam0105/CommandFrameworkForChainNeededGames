@@ -20,13 +20,13 @@ namespace Sinsam.CommandFramework
         public delegate void EditEventHandler(T context);
         public delegate void ResolveEventHandler(T context);
         public delegate void CommandEventHandler(T context);
-        public delegate void ResetableEditEventHandler(T context);
+        public delegate void NumPreviewCaptureHandler(T context, bool isValid);
 
         private AsyncEventHandler _editAsyncEvent;
         private AsyncEventHandler _frontEndAsyncEvent;
         private ValidationEventHandler _validationEvent;
         private EditEventHandler _editEvent;
-        private ResetableEditEventHandler _resetableEditEvent;
+        private CommandEventHandler _numChangeEvent;
         private ResolveEventHandler _resolveEvent;
         private CommandEventHandler _beforeFrontEndEvent;
         private CommandEventHandler _frontEndEvent;
@@ -44,10 +44,10 @@ namespace Sinsam.CommandFramework
             remove => _editEvent -= value;
         }
 
-        public event ResetableEditEventHandler ResetableEditEvent
+        public event CommandEventHandler NumChangeEvent
         {
-            add => _resetableEditEvent += value;
-            remove => _resetableEditEvent -= value;
+            add => _numChangeEvent += value;
+            remove => _numChangeEvent -= value;
         }
 
         public event ValidationEventHandler ValidationEvent
@@ -91,16 +91,16 @@ namespace Sinsam.CommandFramework
             if (context == null || command == null)
                 return false;
 
-            ResetableEditSnapshot editSnapshot = null;
-            bool logicSucceeded = false;
+            command.Context = context;
+            ModifierIdSnapshot modifierSnapshot = null;
 
             try
             {
                 if (_editAsyncEvent != null)
                     await InvokeSequentialAsync(_editAsyncEvent, context);
 
-                editSnapshot = ResetableEditSnapshot.Capture(context);
-                InvokeSequential(_resetableEditEvent, context);
+                modifierSnapshot = ModifierIdSnapshot.Capture(context);
+                InvokeSequential(_numChangeEvent, context);
 
                 if (!RunValidationOnly(context, command))
                     return false;
@@ -114,8 +114,6 @@ namespace Sinsam.CommandFramework
                 if (!result)
                     return false;
 
-                logicSucceeded = true;
-
                 if (_frontEndAsyncEvent != null)
                     await InvokeSequentialAsync(_frontEndAsyncEvent, context);
 
@@ -126,20 +124,43 @@ namespace Sinsam.CommandFramework
             }
             finally
             {
-                if (logicSucceeded)
-                    context.ResetContext();
-                else
-                    editSnapshot?.Restore();
+                modifierSnapshot?.CleanUp();
             }
         }
 
-        public void RunResetableEditOnly(T context)
+        public CommandNumPreviewResult NumPreview(
+            T context,
+            Command<T> command,
+            NumPreviewCaptureHandler beforeCapture = null)
         {
-            InvokeSequential(_resetableEditEvent, context);
+            if (context == null || command == null)
+                return CommandNumPreviewResult.Invalid;
+
+            command.Context = context;
+            return RunNumPreviewCore(context, command, beforeCapture);
+        }
+
+        public async UniTask<CommandNumPreviewResult> NumPreviewAsync(
+            T context,
+            Command<T> command,
+            NumPreviewCaptureHandler beforeCapture = null)
+        {
+            if (context == null || command == null)
+                return CommandNumPreviewResult.Invalid;
+
+            command.Context = context;
+
+            if (_editAsyncEvent != null)
+                await InvokeSequentialAsync(_editAsyncEvent, context);
+
+            return RunNumPreviewCore(context, command, beforeCapture);
         }
 
         public bool RunValidationOnly(T context, Command<T> command)
         {
+            if (!command.ValidateInCommand())
+                return false;
+
             if (_validationEvent != null)
             {
                 foreach (var handler in _validationEvent.GetInvocationList().Cast<ValidationEventHandler>())
@@ -149,7 +170,27 @@ namespace Sinsam.CommandFramework
                 }
             }
 
-            return command.ValidateInCommand();
+            return true;
+        }
+
+        private CommandNumPreviewResult RunNumPreviewCore(
+            T context,
+            Command<T> command,
+            NumPreviewCaptureHandler beforeCapture)
+        {
+            var modifierSnapshot = ModifierIdSnapshot.Capture(context);
+
+            try
+            {
+                InvokeSequential(_numChangeEvent, context);
+                bool isValid = RunValidationOnly(context, command);
+                beforeCapture?.Invoke(context, isValid);
+                return CommandNumPreviewResult.FromContext(isValid, context);
+            }
+            finally
+            {
+                modifierSnapshot.CleanUp();
+            }
         }
 
         private static void InvokeSequential(CommandEventHandler evt, T context)
@@ -158,15 +199,6 @@ namespace Sinsam.CommandFramework
                 return;
 
             foreach (CommandEventHandler handler in evt.GetInvocationList())
-                handler(context);
-        }
-
-        private static void InvokeSequential(ResetableEditEventHandler evt, T context)
-        {
-            if (evt == null)
-                return;
-
-            foreach (ResetableEditEventHandler handler in evt.GetInvocationList())
                 handler(context);
         }
 
