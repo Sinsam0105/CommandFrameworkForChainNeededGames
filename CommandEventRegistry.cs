@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Sinsam.CommandFramework
 {
@@ -9,6 +10,17 @@ namespace Sinsam.CommandFramework
     public static class CommandEventRegistry
     {
         public static readonly Dictionary<Type, ICommandEvent> CommandEvents = new();
+
+        /// <summary>
+        /// Clears all registered CommandEvent instances.
+        /// Runs automatically before the scene loads so stale entries from a previous
+        /// play session are not leaked when Unity's domain reload is disabled.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        public static void Initialize()
+        {
+            CommandEvents.Clear();
+        }
 
         public static CommandEvent<TContext> GetOrCreate<TContext>(Type commandType)
             where TContext : class, ICommandContext
