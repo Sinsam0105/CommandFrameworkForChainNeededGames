@@ -27,7 +27,9 @@ namespace Sinsam.CommandFramework
     public enum ModifierLifetime
     {
         Permanent,
-        OneCommand
+        OneCommand,
+        OneTurn,
+        OneBattle
     }
 
     [Serializable]
