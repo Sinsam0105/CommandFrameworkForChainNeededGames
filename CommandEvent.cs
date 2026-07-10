@@ -104,6 +104,7 @@ namespace Sinsam.CommandFramework
                 return false;
 
             command.Context = context;
+            context.PrepareContext();
             ModifierIdSnapshot modifierSnapshot = null;
 
             try
@@ -154,6 +155,7 @@ namespace Sinsam.CommandFramework
                 return CommandNumPreviewResult.Invalid;
 
             command.Context = context;
+            context.PrepareContext();
             return RunNumPreviewCore(context, command, beforeCapture);
         }
 
@@ -166,6 +168,7 @@ namespace Sinsam.CommandFramework
                 return CommandNumPreviewResult.Invalid;
 
             command.Context = context;
+            context.PrepareContext();
 
             if (_editAsyncEvent != null)
                 await InvokeSequentialAsync(_editAsyncEvent, context);
@@ -177,6 +180,8 @@ namespace Sinsam.CommandFramework
         {
             if (context == null || command == null)
                 return false;
+
+            context.PrepareContext();
 
             if (!command.ValidateInCommand())
                 return false;
