@@ -26,7 +26,7 @@ namespace Sinsam.CommandFramework
                 return new CommandNumPreviewResult(isValid, EmptyValues);
 
             var values = new Dictionary<IEffectableValue, object>();
-            RuntimeDataReflection.ForEachEffectable(context, value =>
+            PreviewEffectableTraversal.ForEachEffectable(context, value =>
             {
                 values[value] = value.BoxedFinalValue;
             });
@@ -71,7 +71,7 @@ namespace Sinsam.CommandFramework
         {
             var snapshot = new ModifierIdSnapshot();
 
-            RuntimeDataReflection.ForEachEffectable(context, value =>
+            PreviewEffectableTraversal.ForEachEffectable(context, value =>
             {
                 var ids = new HashSet<int>();
                 value.CollectModifierIds(ids);
@@ -102,4 +102,36 @@ namespace Sinsam.CommandFramework
             }
         }
     }
+
+    internal static class PreviewEffectableTraversal
+    {
+        public static void ForEachEffectable(
+            object context,
+            Action<IEffectableValue> visitor)
+        {
+            if (context == null || visitor == null)
+                return;
+
+            if (context is IExplicitPreviewValueProvider explicitProvider)
+            {
+                var visited = new HashSet<IEffectableValue>();
+                IEnumerable<IEffectableValue> values =
+                    explicitProvider.GetPreviewEffectableValues();
+
+                if (values == null)
+                    return;
+
+                foreach (IEffectableValue value in values)
+                {
+                    if (value != null && visited.Add(value))
+                        visitor(value);
+                }
+
+                return;
+            }
+
+            RuntimeDataReflection.ForEachEffectable(context, visitor);
+        }
+    }
 }
+
