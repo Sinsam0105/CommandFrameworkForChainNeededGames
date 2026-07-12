@@ -13,7 +13,8 @@ namespace Sinsam.CommandFramework
         public T Context;
 
         /// <summary>
-        /// Command-owned validation. CommandEvent.Run calls this after external ValidationEvent handlers.
+        /// Command-owned validation. CommandEvent.Run calls this after external
+        /// ValidationEvent handlers.
         /// </summary>
         public virtual bool ValidateInCommand()
         {
@@ -21,9 +22,18 @@ namespace Sinsam.CommandFramework
         }
 
         /// <summary>
-        /// Actual business logic. Keep it synchronous; use EditAsyncEvent for async input/preparation.
+        /// Synchronous business logic used by existing commands.
         /// </summary>
         public abstract bool Logic();
+
+        /// <summary>
+        /// Awaitable business logic. Existing synchronous commands are wrapped by
+        /// default; commands with asynchronous effects should override this method.
+        /// </summary>
+        public virtual UniTask<bool> LogicAsync()
+        {
+            return UniTask.FromResult(Logic());
+        }
 
         public UniTask<bool> Execute()
         {

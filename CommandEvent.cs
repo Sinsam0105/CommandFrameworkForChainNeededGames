@@ -124,7 +124,7 @@ namespace Sinsam.CommandFramework
                 InvokeSequential(_beforeFrontEndEvent, context);
                 _resolveEvent?.Invoke(context);
 
-                bool result = command.Logic();
+                bool result = await command.LogicAsync();
                 if (!result)
                     return false;
 
